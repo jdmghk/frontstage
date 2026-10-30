@@ -15,6 +15,8 @@ export interface StudioMorphic {
   account: MorphicAccount;
   generateShotTake(p: Production, scene: Scene, shot: Shot, opts: { name: string; folderId?: string }): Promise<MorphicStartResult>;
   generateCharacterDesign(c: Character, opts: { name: string; folderId?: string }): Promise<MorphicStartResult>;
+  /** Characters trained in Morphic Studio, to link as a character's likeness. */
+  listTrainedCharacters?(): Promise<{ id: string; name: string; shared: boolean }[] | { error: string }>;
 }
 
 const noteStyle: React.CSSProperties = { fontSize: theme.fontSize.xs, color: theme.text.secondary, lineHeight: 1.4 };

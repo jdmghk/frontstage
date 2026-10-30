@@ -4,7 +4,7 @@ import { parseGenerationStatus, removeCharacter, upsertCharacter } from "@fronts
 import { generatingLabel } from "../media/GeneratingOverlay.js";
 import type { StudioMorphic } from "./morphic.js";
 import { theme } from "../theme/theme.js";
-import { Button, Icon, IconButton, TextInput } from "../primitives/index.js";
+import { Button, Icon, IconButton, Select, TextInput } from "../primitives/index.js";
 import { ensureFolderPath, type ProductionStore } from "./production-store.js";
 import type { CharacterLibrary, ProjectMediaAccess } from "./character-library.js";
 import type { ProductionLibrary } from "./ProductionTab.js";
@@ -186,6 +186,20 @@ function CharacterCard({ p, character: c, index, production, library, characterL
     }
   };
 
+  const [trained, setTrained] = useState<{ id: string; name: string; shared: boolean }[] | null>(null);
+  const loadTrained = async () => {
+    if (!morphic?.listTrainedCharacters) return;
+    setBusy(true);
+    try {
+      const r = await morphic.listTrainedCharacters();
+      if ("error" in r) setMessage(r.error);
+      else if (r.length === 0) setMessage("No trained characters in your Morphic account yet. Train one in Morphic Studio, then link it here.");
+      else setTrained(r);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // The new design lands as a reference; the user marks it "Design" once they like it.
   const handleMorphicDesign = async () => {
     if (!morphic) return;
@@ -285,6 +299,11 @@ function CharacterCard({ p, character: c, index, production, library, characterL
         <Button size="small" disabled={busy} testid={`${tid}-add-refs`} onClick={() => fileInput.current?.click()}>
           Add reference images…
         </Button>
+        {morphic?.listTrainedCharacters && !c.morphicCharacterId && !trained && (
+          <Button size="small" disabled={busy} testid={`${tid}-morphic-link`} onClick={() => void loadTrained()} title="Use a character you trained in Morphic Studio as this character's likeness">
+            Link Morphic character…
+          </Button>
+        )}
         {morphic && (
           <Button
             size="small"
@@ -302,6 +321,33 @@ function CharacterCard({ p, character: c, index, production, library, characterL
           </Button>
         )}
       </div>
+      {trained && !c.morphicCharacterId && (
+        <div style={rowStyle}>
+          <Select
+            value={null}
+            placeholder="Choose a trained character…"
+            options={trained.map((t) => ({ value: t.id, label: t.shared ? `${t.name} (shared)` : t.name }))}
+            onChange={(id) => {
+              const t = trained.find((x) => x.id === id);
+              set({ morphicCharacterId: id, morphicCharacterName: t?.name });
+              setTrained(null);
+              setMessage("Linked. Generate design in Morphic now uses this trained likeness.");
+            }}
+            testid={`${tid}-morphic-pick`}
+          />
+          <Button size="small" onClick={() => setTrained(null)}>
+            Cancel
+          </Button>
+        </div>
+      )}
+      {c.morphicCharacterId && (
+        <div style={{ ...rowStyle, fontSize: theme.fontSize.xs, color: theme.text.secondary }} data-testid={`${tid}-morphic-linked`}>
+          <span style={{ flex: 1 }}>Morphic character: {c.morphicCharacterName ?? c.morphicCharacterId}</span>
+          <Button size="small" onClick={() => set({ morphicCharacterId: undefined, morphicCharacterName: undefined })} testid={`${tid}-morphic-unlink`}>
+            Unlink
+          </Button>
+        </div>
+      )}
       {message && (
         <div style={{ fontSize: theme.fontSize.xs, color: theme.text.secondary }} data-testid={`${tid}-message`}>
           {message}

@@ -62,9 +62,10 @@ or cancelled generation, or one without an asset, marks it *failed* with Morphic
   message is shown on the shot. Change the shot duration and try again.
 - **Project.** Results also appear in your most recently updated Morphic project. That project's name
   is shown when a job starts.
-- **Trained Morphic characters** (`list_characters`, `edit_image`'s `character_id`) are not wired
-  into the UI yet. Character consistency currently comes from uploading your approved design images
-  as references. That improves consistency, but no model guarantees an identical character.
+- **Trained Morphic characters**: link one on a character card; **Generate design in Morphic** then
+  uses it as `edit_image`'s `character_id`. `generate_video` doesn't accept a character id, so shots
+  carry the likeness through the designs you approve. Characters are trained in Morphic Studio; its
+  MCP server can't train them. No model guarantees an identical character in every clip.
 
 ## Manual live check
 

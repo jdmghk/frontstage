@@ -182,16 +182,35 @@ export class MorphicStudio {
     });
   }
 
-  /** A new design image for a character, conditioned on its existing references when it has any. */
+  /** Characters trained in Morphic Studio (this app can't train one; Morphic's server can't either). */
+  async listTrainedCharacters(): Promise<{ id: string; name: string; shared: boolean }[] | { error: string }> {
+    try {
+      if (!(await this.deps.bridge.isSignedIn())) return { error: "Sign in to Morphic first (Settings → Generation)." };
+      const res = await this.deps.bridge.callTool("list_characters", { limit: 100 });
+      if (res.isError) return { error: (res.content ?? []).map((c) => c.text ?? "").join(" ") || "Could not list Morphic characters" };
+      const list = (res.structuredContent as { characters?: { character_id: string; name: string | null; shared_from_another_organization: boolean }[] })?.characters ?? [];
+      return list.map((c) => ({ id: c.character_id, name: c.name ?? "Unnamed character", shared: c.shared_from_another_organization }));
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  /**
+   * A new design image for a character. A linked Morphic-trained character is passed as the
+   * likeness (edit_image character_id, which counts as one reference); existing designs and
+   * references are added up to the tool's limit. Without either, it's a text-only generate_image.
+   */
   async generateCharacterDesign(c: Character, opts: { name: string; folderId?: string }): Promise<MorphicStartResult> {
     const prompt = characterDesignPrompt(c);
     const refIds = [...c.approvedDesignIds, ...c.referenceMediaIds.filter((id) => !c.approvedDesignIds.includes(id))];
-    const prep = await this.prepare(refIds, MAX_IMAGE_REFS);
+    const trained = c.morphicCharacterId;
+    const prep = await this.prepare(refIds, trained ? MAX_IMAGE_REFS - 1 : MAX_IMAGE_REFS);
     if ("error" in prep) return prep;
     const { refs } = prep;
-    const tool: MorphicGenTool = refs.assetIds.length > 0 ? "edit_image" : "generate_image";
+    const tool: MorphicGenTool = refs.assetIds.length > 0 || trained ? "edit_image" : "generate_image";
     const input: Record<string, unknown> = { prompt, aspect_ratio: "3:4" };
     if (refs.assetIds.length > 0) input.image_asset_ids = refs.assetIds;
+    if (trained) input.character_id = trained;
     return this.start(tool, input, prep.project, {
       type: "image",
       name: opts.name,

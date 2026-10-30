@@ -304,3 +304,24 @@ describe("Claude writing and the Flow hand-off", () => {
     expect(screen.getByTestId("shot-0-0-message").textContent).toContain("/tmp/flow/x");
   });
 });
+
+describe("Morphic trained characters", () => {
+  test("link a trained character, then unlink it", async () => {
+    const production = new ProductionStore();
+    const library = fakeProductionLibrary();
+    production.update((p) => upsertCharacter(p, { name: "Kai" }).production);
+    const morphic: StudioMorphic = {
+      account: { isSignedIn: async () => true, signIn: async () => {}, signOut: async () => {} },
+      generateShotTake: async () => ({ error: "x" }),
+      generateCharacterDesign: async () => ({ error: "x" }),
+      listTrainedCharacters: async () => [{ id: "mc1", name: "Kai v2", shared: false }],
+    };
+    render(<CharactersTab production={production} library={library} morphic={morphic} />);
+    await act(async () => fireEvent.click(screen.getByTestId("character-0-morphic-link")));
+    fireEvent.change(screen.getByTestId("character-0-morphic-pick"), { target: { value: "mc1" } });
+    expect(production.getSnapshot().characters[0]).toMatchObject({ morphicCharacterId: "mc1", morphicCharacterName: "Kai v2" });
+    expect(screen.getByTestId("character-0-morphic-linked").textContent).toContain("Kai v2");
+    fireEvent.click(screen.getByTestId("character-0-morphic-unlink"));
+    expect(production.getSnapshot().characters[0]!.morphicCharacterId).toBeUndefined();
+  });
+});

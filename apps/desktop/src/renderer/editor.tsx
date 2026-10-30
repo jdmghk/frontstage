@@ -107,6 +107,7 @@ const morphic: StudioMorphic = {
   account: morphicBridge,
   generateShotTake: (p, scene, shot, opts) => morphicStudio.generateShotTake(p, scene, shot, opts),
   generateCharacterDesign: (c, opts) => morphicStudio.generateCharacterDesign(c, opts),
+  listTrainedCharacters: () => morphicStudio.listTrainedCharacters(),
 };
 
 // Visual-search embedding runtime (SigLIP2, M12C) — long-lived across project opens; the model

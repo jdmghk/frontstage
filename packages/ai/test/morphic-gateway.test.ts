@@ -11,7 +11,7 @@ import {
   type MorphicToolResult,
 } from "../src/generation/morphic-gateway.js";
 import { MorphicStudio, shotPrompt } from "../src/generation/morphic-studio.js";
-import { GenerationService, type GenerationHost } from "../src/generation/generation-service.js";
+import { GenerationService, type GenerationHost, type StartJobArgs } from "../src/generation/generation-service.js";
 import type { GenJobGateway } from "../src/generation/gen-gateway.js";
 
 const G1 = "019a0000-0000-7000-8000-000000000001";
@@ -265,5 +265,30 @@ describe("MorphicStudio", () => {
     const empty = { ...shot, prompt: "", description: "" };
     expect(await studio.generateShotTake(p, scene, empty, { name: "a" })).toEqual({ error: "Write the shot's prompt or description first." });
     expect(uploads).toEqual([]);
+  });
+});
+
+describe("Morphic trained characters", () => {
+  test("lists trained characters, including shared ones", async () => {
+    const { bridge } = fakeBridge({
+      list_characters: [ok({ characters: [{ character_id: "019a0000-0000-7000-8000-0000000000c1", name: "Kai v2", created_at: "x", shared_from_another_organization: false }, { character_id: "c2", name: null, created_at: "x", shared_from_another_organization: true }] })],
+    });
+    const studio = new MorphicStudio({ bridge, generation: { addPlaceholder: () => {}, startJob: async () => ({ jobId: "j" }) }, entries: () => [], loadBytes: async () => undefined, newId: () => "x" });
+    expect(await studio.listTrainedCharacters()).toEqual([
+      { id: "019a0000-0000-7000-8000-0000000000c1", name: "Kai v2", shared: false },
+      { id: "c2", name: "Unnamed character", shared: true },
+    ]);
+  });
+
+  test("a linked trained character is sent as edit_image character_id, even with no references", async () => {
+    const { bridge } = fakeBridge({ list_projects: [ok({ projects: [PROJECT] })] });
+    const starts: StartJobArgs[] = [];
+    const studio = new MorphicStudio({ bridge, generation: { addPlaceholder: () => {}, startJob: async (a) => (starts.push(a), { jobId: "j" }) }, entries: () => [], loadBytes: async () => undefined, newId: () => "ph" });
+    await studio.generateCharacterDesign(
+      { id: "c", name: "Kai", description: "", appearance: { ageRange: "", hair: "", clothing: "", build: "", other: "" }, referenceMediaIds: [], approvedDesignIds: [], continuityNotes: "", morphicCharacterId: "019a0000-0000-7000-8000-0000000000c1" },
+      { name: "Kai design" },
+    );
+    expect(starts[0]).toMatchObject({ modelEndpoint: "morphic/edit_image", input: { character_id: "019a0000-0000-7000-8000-0000000000c1" } });
+    expect(starts[0]!.input).not.toHaveProperty("image_asset_ids");
   });
 });

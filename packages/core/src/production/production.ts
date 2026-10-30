@@ -113,6 +113,9 @@ export const CharacterSchema = z.object({
   approvedDesignIds: z.array(z.string()).default([]),
   voiceProfileId: z.string().optional(),
   continuityNotes: z.string().default(""),
+  /** A character trained in Morphic Studio; design generation then uses it as the likeness. */
+  morphicCharacterId: z.string().optional(),
+  morphicCharacterName: z.string().optional(),
 });
 
 export const StorySchema = z.object({
