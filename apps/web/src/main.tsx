@@ -1,4 +1,4 @@
-import { StrictMode, useState, useEffect } from "react";
+import { StrictMode, useState, useEffect, useMemo, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { EditorStore, ProjectSession, SAMPLER_VERSION } from "@frontstage/core";
 import type { GenerationLogEntry } from "@frontstage/core";
@@ -7,8 +7,8 @@ import { renderSpanToMp4 } from "@frontstage/engine";
 import "@frontstage/ui/theme/tokens.css";
 import { CharacterLibrary, createOpfsCharacterStorage, type ProductionStore } from "@frontstage/ui";
 import { restoreLayout, createEditorHost, localProjectStore, measureCaptionWidthFrac, MediaIndexingService, IndexingStatusRelay, createDomFrameTap, createDomOpenMedia, renderMattePng, encodeFrameJPEG, readConfirmThreshold, writeConfirmThreshold } from "@frontstage/ui";
-import type { KeyConfig, FalKeyConfig, RelayConfig, GenerationFacade, MediaIndexingHost, MediaIndexingFacade } from "@frontstage/ui";
-import { AgentSession, ChatSessionStore, ToolExecutor, buildCatalog, ImageGenerator, GenerationService, listLLMModels, listImageModels, defaultLLMModel, defaultImageModel, makeEntryUrl, TranscriptionService, EmbeddingService, createTransformersPipelines, LocalAsrService, createTransformersAsrPipelines, SkillStore, SkillCatalog, skillsSection } from "@frontstage/ai";
+import type { KeyConfig, FalKeyConfig, RelayConfig, GenerationFacade, MediaIndexingHost, MediaIndexingFacade, FrameSampler } from "@frontstage/ui";
+import { AgentSession, ChatSessionStore, ToolExecutor, buildCatalog, ImageGenerator, GenerationService, listLLMModels, listImageModels, defaultLLMModel, defaultImageModel, makeEntryUrl, TranscriptionService, EmbeddingService, createTransformersPipelines, LocalAsrService, createTransformersAsrPipelines, SkillStore, SkillCatalog, skillsSection, VoiceStudio, VeoStudio, STUDIO_MODELS, DEFAULT_STUDIO_MODEL } from "@frontstage/ai";
 import type { GenerationHost, TranscriptionHost, ToolContext, ToolResult } from "@frontstage/ai";
 import { App } from "./App.js";
 import { sampleTimeline, buildSampleLibrary } from "./sample-project.js";
@@ -17,6 +17,7 @@ import { WebExportGateway } from "./web-export.js";
 import { createWebInteropExport } from "./web-interop-export.js";
 import { WebAiGateway } from "./web-ai-gateway.js";
 import { WebGenGateway } from "./web-gen-gateway.js";
+import { WebClaudeGateway, makeWebFrameSampler } from "./web-studio.js";
 import { makeWebAudioExtractor } from "./web-audio-extract.js";
 import { createWebMediaImport } from "./web-media-import.js";
 import { createWebSkillStorage, createWebSkillCatalogDeps } from "./web-skills.js";
@@ -49,13 +50,54 @@ interface FrontstageAppProps {
   skillCatalog: SkillCatalog;
   production: ProductionStore;
   characterLibrary: CharacterLibrary;
+  studio: WebStudio;
 }
 
-function FrontstageApp({ store, session, library, exportGateway, interopExport, agentSession, imageGenerator, sessionStore, mentionItems, aiProxyUrl, engineRef, getGenerationLog, genGateway, generationFacade, executor, transcriptionFacade, indexing, skillStore, skillCatalog, production, characterLibrary }: FrontstageAppProps) {
+/** Production-tab services for the web editor (Claude via proxy/relay, fal voice + Veo, browser frames). */
+interface WebStudio {
+  claude: WebClaudeGateway;
+  voice: VoiceStudio;
+  veo: VeoStudio;
+  sampleFrames: FrameSampler;
+}
+
+function FrontstageApp({ store, session, library, exportGateway, interopExport, agentSession, imageGenerator, sessionStore, mentionItems, aiProxyUrl, engineRef, getGenerationLog, genGateway, generationFacade, executor, transcriptionFacade, indexing, skillStore, skillCatalog, production, characterLibrary, studio }: FrontstageAppProps) {
   const [agentModel, setAgentModel] = useState(() => localStorage.getItem("frontstage.agent.model") ?? defaultLLMModel());
   const [imageModel, setImageModel] = useState(() => localStorage.getItem("frontstage.image.model") ?? defaultImageModel());
   const [proxyUrl, setProxyUrl] = useState(() => localStorage.getItem("frontstage.ai.proxyUrl") ?? aiProxyUrl);
   const [falEnabled, setFalEnabled] = useState(false);
+  const [claudeOn, setClaudeOn] = useState(false);
+  const [relayAnthropicKey, setRelayAnthropicKey] = useState(() => getUserKeys().anthropicKey ?? "");
+  const [studioModel, setStudioModel] = useState(() => localStorage.getItem("frontstage.studio.model") ?? DEFAULT_STUDIO_MODEL);
+  const studioModelRef = useRef(studioModel);
+  studioModelRef.current = studioModel;
+  useEffect(() => {
+    studio.claude.hasKey().then(setClaudeOn).catch(() => setClaudeOn(false));
+  }, [studio, relayAnthropicKey, proxyUrl]);
+  const writer = useMemo(() => ({ gateway: studio.claude, model: () => studioModelRef.current }), [studio]);
+  // Relay mode: the Anthropic key lives in this browser like the fal/OpenRouter keys; proxy mode:
+  // the self-host proxy holds ANTHROPIC_API_KEY, so only the model choice is shown.
+  const claudeSettings = RELAY_MODE
+    ? {
+        keyConfig: {
+          hasKey: !!relayAnthropicKey,
+          onSetKey: (k: string) => {
+            setUserKeys({ anthropicKey: k });
+            setRelayAnthropicKey(k);
+          },
+          onClearKey: () => {
+            setUserKeys({ anthropicKey: "" });
+            setRelayAnthropicKey("");
+          },
+        },
+        model: studioModel,
+        models: STUDIO_MODELS,
+        onModelChange: (id: string) => {
+          setStudioModel(id);
+          localStorage.setItem("frontstage.studio.model", id);
+        },
+      }
+    : undefined;
   const [confirmThreshold, setConfirmThreshold] = useState(() => readConfirmThreshold());
   const [relayUser, setRelayUser] = useState<{ id: string; name: string; provider: string } | null>(null);
   const [relayFalKey, setRelayFalKey] = useState(() => getUserKeys().falKey ?? "");
@@ -151,6 +193,10 @@ function FrontstageApp({ store, session, library, exportGateway, interopExport, 
       relayAuth={relayAuth}
       production={production}
       characterLibrary={characterLibrary}
+      writer={claudeOn ? writer : undefined}
+      sampleFrames={claudeOn ? studio.sampleFrames : undefined}
+      voice={falEnabled ? studio.voice : undefined}
+      veo={falEnabled ? studio.veo : undefined}
       agent={{
         session: agentSession,
         model: agentModel,
@@ -173,6 +219,7 @@ function FrontstageApp({ store, session, library, exportGateway, interopExport, 
           confirmThreshold,
           onConfirmThresholdChange,
           skills: { store: skillStore, catalog: skillCatalog },
+          claude: claudeSettings,
         },
         relayGate,
       }}
@@ -381,6 +428,15 @@ async function bootstrap() {
       genGateway.uploadFile(bytes, contentType, fileName),
   };
 
+  const studio: WebStudio = {
+    claude: new WebClaudeGateway(
+      RELAY_MODE ? { mode: "relay", origin: getRelayOrigin(), getKeys: getUserKeys } : { mode: "proxy", proxyUrl: aiProxyUrl, proxyToken: aiProxyToken },
+    ),
+    voice: new VoiceStudio({ generation: generationFacade, entryUrl, newId: () => crypto.randomUUID() }),
+    veo: new VeoStudio({ generation: generationFacade, entryUrl, entries: () => library.getSnapshot().entries, newId: () => crypto.randomUUID() }),
+    sampleFrames: makeWebFrameSampler((id) => library.readEntryBytes(id)),
+  };
+
   // Delegates through the ref (not a captured instance) so any future recreate is picked up.
   const transcriptionFacade = {
     transcribe: (mediaRef: string, opts?: { language?: string }) => transcriptionServiceRef.current.transcribe(mediaRef, opts),
@@ -507,6 +563,7 @@ async function bootstrap() {
         production={production}
         characterLibrary={characterLibrary}
         skillCatalog={skillCatalog}
+        studio={studio}
       />
     </StrictMode>,
   );

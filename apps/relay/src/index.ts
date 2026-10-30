@@ -1,3 +1,4 @@
+import { handleClaudeRun } from "./claude.js";
 import {
   buildGithubAuthorizeUrl,
   buildGoogleAuthorizeUrl,
@@ -147,6 +148,7 @@ export default {
     if (pathname === "/fal/download" && request.method === "GET") return handleFalDownload(url);
     if (pathname === "/fal/upload" && request.method === "POST") return handleFalUpload(request, url);
     if (pathname === "/import/download" && request.method === "POST") return handleImportDownload(request);
+    if (pathname === "/anthropic/run" && request.method === "POST") return handleClaudeRun(request);
 
     return new Response("Not found", { status: 404 });
   },

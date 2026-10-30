@@ -11,6 +11,7 @@ export interface RelayUser {
 export interface UserKeys {
   falKey?: string;
   openRouterKey?: string;
+  anthropicKey?: string;
 }
 
 export type AuthProvider = "google" | "github";
@@ -31,6 +32,7 @@ export function getUserKeys(): UserKeys {
     return {
       ...(typeof parsed.falKey === "string" ? { falKey: parsed.falKey } : {}),
       ...(typeof parsed.openRouterKey === "string" ? { openRouterKey: parsed.openRouterKey } : {}),
+      ...(typeof parsed.anthropicKey === "string" ? { anthropicKey: parsed.anthropicKey } : {}),
     };
   } catch {
     return {};

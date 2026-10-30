@@ -1,3 +1,5 @@
+import Anthropic from "@anthropic-ai/sdk";
+import { buildClaudeParams, claudeErrorResult, interpretClaudeMessage } from "@frontstage/ai/claude-wire";
 import crypto from "node:crypto";
 import http from "node:http";
 import { Agent } from "undici";
@@ -15,6 +17,10 @@ export interface ProxyServerOptions {
   // (as opposed to pre-flight Content-Length) enforcement path can be exercised without
   // actually allocating gigabytes of fake body. Defaults to IMPORT_MAX_BYTES (5GB).
   importMaxBytes?: number;
+  /** Enables /anthropic/* (Claude writing for the web editor). */
+  anthropicKey?: string;
+  /** Test seam: builds the Anthropic client. */
+  makeAnthropic?: (apiKey: string) => Anthropic;
 }
 
 function corsHeaders(origin: string): Record<string, string> {
@@ -214,6 +220,31 @@ export function createProxyServer(opts: ProxyServerOptions): http.Server {
         return;
       }
       void readBody(req).then((body) => forward(body, upstream, opts.apiKey, origin, res));
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/anthropic/enabled") {
+      if (!isAuthorized(req, proxyToken)) {
+        writeUnauthorized(res, origin);
+        return;
+      }
+      res.writeHead(200, jsonHeaders(origin));
+      res.end(JSON.stringify({ enabled: !!opts.anthropicKey }));
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/anthropic/run") {
+      if (!isAuthorized(req, proxyToken)) {
+        writeUnauthorized(res, origin);
+        return;
+      }
+      if (!opts.anthropicKey) {
+        res.writeHead(503, jsonHeaders(origin));
+        res.end(JSON.stringify({ ok: false, kind: "no-key", error: "Claude isn't configured on this proxy (set ANTHROPIC_API_KEY)." }));
+        return;
+      }
+      const make = opts.makeAnthropic ?? ((key: string) => new Anthropic({ apiKey: key, maxRetries: 3 }));
+      void readBodyCapped(req, MAX_CLAUDE_REQUEST_BODY).then((body) => handleClaudeRun(body, make(opts.anthropicKey!), origin, res));
       return;
     }
 
@@ -677,5 +708,29 @@ async function handleFalUpload(
   } catch {
     res.writeHead(502, jsonHeaders(origin));
     res.end(JSON.stringify({ error: "fal upload error" }));
+  }
+}
+
+// Claude writing for the web editor: the request is validated and built by the shared claude-wire
+// module (same rules as the desktop app), sent with the SDK, and answered with a ClaudeStudioResult.
+const MAX_CLAUDE_REQUEST_BODY = 25 * 1024 * 1024; // up to 20 frames of choreography analysis
+
+async function handleClaudeRun(body: Buffer | { tooLarge: true }, client: Anthropic, origin: string, res: http.ServerResponse): Promise<void> {
+  const reply = (status: number, payload: unknown) => {
+    res.writeHead(status, jsonHeaders(origin));
+    res.end(JSON.stringify(payload));
+  };
+  if ("tooLarge" in body) return reply(413, { ok: false, kind: "invalid", error: "request body too large" });
+  let params: Record<string, unknown>;
+  try {
+    params = buildClaudeParams(JSON.parse(body.toString("utf-8")));
+  } catch (e) {
+    return reply(400, { ok: false, kind: "invalid", error: e instanceof Error ? e.message : String(e) });
+  }
+  try {
+    const message = await client.beta.messages.stream(params as never).finalMessage();
+    reply(200, interpretClaudeMessage(message as never));
+  } catch (err) {
+    reply(200, claudeErrorResult(err));
   }
 }

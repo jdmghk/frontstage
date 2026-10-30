@@ -25,8 +25,8 @@ export interface ClaudeStudioRequest {
   maxTokens: number;
 }
 
-export type ClaudeStudioErrorKind = "no-key" | "refusal" | "truncated" | "auth" | "rate-limit" | "api" | "invalid";
-export type ClaudeStudioResult = { ok: true; json: unknown } | { ok: false; kind: ClaudeStudioErrorKind; error: string };
+import type { ClaudeStudioErrorKind, ClaudeStudioResult } from "./claude-wire.js";
+export type { ClaudeStudioErrorKind, ClaudeStudioResult };
 
 export interface ClaudeGateway {
   run(req: ClaudeStudioRequest): Promise<ClaudeStudioResult>;
