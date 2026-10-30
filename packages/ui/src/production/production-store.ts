@@ -1,4 +1,4 @@
-import { dropMediaRefs, emptyProduction, parseGenerationStatus, syncGeneratingShots } from "@frontstage/core";
+import { dropMediaRefs, emptyProduction, parseGenerationStatus, syncGeneratingLines, syncGeneratingShots } from "@frontstage/core";
 import type { TakeMediaState } from "@frontstage/core";
 import type { MediaFolder, MediaManifestEntry, Production } from "@frontstage/core";
 
@@ -45,7 +45,11 @@ export class ProductionStore {
    */
   attachLibrary(library: LibraryLike): () => void {
     this.knownMediaIds = new Set(library.getSnapshot().entries.map((e) => e.id));
-    const sync = () => this.update((p) => syncGeneratingShots(p, (id) => takeMediaState(library.getSnapshot().entries, id)));
+    const sync = () =>
+      this.update((p) => {
+        const stateOf = (id: string) => takeMediaState(library.getSnapshot().entries, id);
+        return syncGeneratingLines(syncGeneratingShots(p, stateOf), stateOf);
+      });
     sync();
     const unsubscribe = library.subscribe(() => {
       const ids = new Set(library.getSnapshot().entries.map((e) => e.id));

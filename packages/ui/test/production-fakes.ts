@@ -33,7 +33,7 @@ export function fakeProductionLibrary(initial: MediaManifestEntry[] = [], opts: 
     entry: (id: string) => entries.find((e) => e.id === id),
     async importFiles(files: File[] | FileList, folderId?: string) {
       const added = Array.from(files).map((f) => {
-        let e = add(f.name, f.type.startsWith("image/") ? "image" : "video", folderId);
+        let e = add(f.name, f.type.startsWith("image/") ? "image" : f.type.startsWith("audio/") ? "audio" : "video", folderId);
         if (opts.pendingImports) {
           e = { ...e, duration: 0, generationStatus: "downloading" };
           entries = entries.map((x) => (x.id === e.id ? e : x));

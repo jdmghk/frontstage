@@ -136,6 +136,16 @@ describe("apply rules", () => {
     expect(sceneOf(next).dialogueState).toBe("draft");
   });
 
+  test("rewriting dialogue keeps lines that already have recordings", () => {
+    const { p } = fixture();
+    const t = dialogueTask(p, sceneOf(p));
+    const first = t.apply(p, { lines: [{ speaker: "Narrator", text: "old 1", direction: "" }, { speaker: "Narrator", text: "old 2", direction: "" }] });
+    const recorded = { ...first, scenes: [{ ...sceneOf(first), dialogue: sceneOf(first).dialogue.map((l, i) => (i === 0 ? { ...l, takes: ["t1"] } : l)) }] };
+    const next = t.apply(recorded, { lines: [{ speaker: "Narrator", text: "new", direction: "" }] });
+    expect(sceneOf(next).dialogue.map((l) => l.text)).toEqual(["old 1", "new"]);
+    expect(sceneOf(next).dialogue[0]!.takes).toEqual(["t1"]);
+  });
+
   test("continuity: scene notes replaced, character notes appended once", () => {
     const { p } = fixture();
     const t = continuityTask(p, sceneOf(p));

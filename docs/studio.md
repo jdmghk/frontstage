@@ -19,7 +19,8 @@ rail, no separate dashboard.
 | Cross-project character library | **Implemented** | Desktop: `~/.frontstage/characters/<id>/`. Web: browser OPFS (per browser profile) |
 | Draft/approved state for written text | **Implemented** | Editing approved text returns it to draft |
 | Manual import of Google Flow / Morphic results | **Implemented** | Pick the source when importing a take; recorded per take |
-| Voice profile on a character | Not yet | Phase 5 |
+| Voice profiles (reference recording + consent record) | **Implemented** (Phase 5) | Media panel → **Voice** tab → **+ Voice**; creation requires confirming it's your voice or you have permission |
+| Voice profile on a character / narrator | **Implemented** | Voice tab → *Who speaks with which voice* |
 | Morphic sign-in (OAuth, desktop) | **Implemented** (Phase 3) | Settings → Generation → Morphic. See [morphic.md](morphic.md) |
 | Generate a shot take in Morphic | **Implemented** | Shot card → **Generate in Morphic**: reference-to-video with the cast's approved designs |
 | Generate a character design in Morphic | **Implemented** | Character card → **Generate design in Morphic**; mark it **Design** to approve |
@@ -33,7 +34,9 @@ rail, no separate dashboard.
 | Claude: per-scene script, shot list, dialogue/voiceover, continuity | **Implemented** | Scene card buttons; each acts on that scene only. **Break into shots** keeps shots that have takes |
 | Claude: per-shot generation prompt | **Implemented** | Shot card → **Write prompt** |
 | Claude in the web editor | Not yet | Needs a proxy/relay route; the desktop app holds the key today |
-| Voice generation | Not yet | Phase 5 (fal-hosted Chatterbox) |
+| Generate, play, regenerate one line | **Implemented** (desktop + web with a fal key) | Voice tab → line → **Generate** / **Regenerate**; every take is kept, approve one. fal-hosted Chatterbox Multilingual, $0.025 per 1,000 characters, 23 languages, 300 characters per line |
+| Place dialogue on the timeline | **Implemented** | **Place on timeline** puts the approved take on an audio track under its shot (or the scene's first shot), after the previous line; **Replace on timeline** swaps just that clip |
+| Export approved dialogue | **Implemented** (desktop) | Voice tab → **Export approved…** writes one audio file per line + `lines.txt` |
 | Fight choreography | Not yet | Phase 5 |
 | YouTube export presets | Not yet | Phase 6 |
 
@@ -79,6 +82,25 @@ Google Flow has no public API. **Prepare for Flow…** on a shot saves a folder 
 `02-03 Rooftop duel - Spinning kick` with `prompt.txt`, `shot.md` (camera, framing, cast, steps) and
 `ref-1…ref-3` (the cast's approved designs first: Flow takes at most three ingredients). Generate in
 Flow, download the clip, then on the shot choose **Google Flow (manual)** and **Import take…**.
+
+## Voice studio
+
+Speech comes from **Chatterbox Multilingual** (Resemble AI, MIT-licensed model) hosted on fal.ai, using
+the fal key from Settings → Generation, so no ElevenLabs subscription is needed. Why not self-hosted:
+running OpenVoice/Chatterbox locally needs a CUDA GPU (or slow CPU inference), several GB of model
+weights and a Python service to maintain; fal costs $0.025 per 1,000 characters instead (about $0.02 for
+a 10-minute script's dialogue). Resemble's open models add an inaudible "Perth" watermark to output.
+
+1. **Voice → + Voice**: name it, choose a short clean recording of one speaker, its language, and
+   confirm it's your voice or you have the speaker's permission (required; the confirmation, note and
+   date are saved with the voice).
+2. **Who speaks with which voice**: pick a voice for the narrator and each character.
+3. Lines come from each scene's dialogue (Production tab or Claude's **Write dialogue**). Per line:
+   **Generate**, play (▶), **Regenerate** for another take, click a take to approve it. Optionally pick
+   the shot it plays over.
+4. **Place on timeline** / **Replace on timeline**, or **Export approved…** for the audio files.
+
+A cloned voice resembles the reference but isn't identical; expressiveness and pacing vary per take.
 
 ## Using it
 

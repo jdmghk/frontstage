@@ -13,6 +13,8 @@ export type IconName =
   | "chevron-up"
   | "clapper"
   | "person"
+  | "mic"
+  | "choreo"
   | "play"
   | "pause"
   | "step-back"
@@ -122,6 +124,23 @@ const PATHS: Record<IconName, React.ReactNode> = {
     <>
       <circle cx="12" cy="8" r="3.5" />
       <path d="M5 20c0-3.9 3.1-6.5 7-6.5s7 2.6 7 6.5" />
+    </>
+  ),
+  mic: (
+    <>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5.5 11a6.5 6.5 0 0 0 13 0" />
+      <line x1="12" y1="17.5" x2="12" y2="21" />
+    </>
+  ),
+  // A figure mid-kick: choreography planning.
+  choreo: (
+    <>
+      <circle cx="10" cy="4.5" r="2" />
+      <path d="M10 7.5l-1 6 -3 6.5" />
+      <path d="M9 13.5l5-1 6-3" />
+      <path d="M9.7 9.5l-4.2 2.5" />
+      <path d="M9.7 9.5l4.3-1.5" />
     </>
   ),
   play: <path d="M8 5.5l11 6.5-11 6.5z" fill="currentColor" stroke="none" />,

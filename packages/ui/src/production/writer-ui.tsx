@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type { DialogueLine, Production, Scene } from "@frontstage/core";
-import { updateScene, updateStory } from "@frontstage/core";
+import { DialogueLineSchema, updateScene, updateStory } from "@frontstage/core";
 import type { ClaudeGateway, FlowPack, WriterTask } from "@frontstage/ai";
 import { charactersTask, outlineTask, runWriterTask } from "@frontstage/ai";
 import { theme } from "../theme/theme.js";
@@ -165,7 +165,7 @@ export function DialogueEditor({ p, scene, production, tid }: { p: Production; s
         <Button
           size="small"
           testid={`${tid}-add-line`}
-          onClick={() => setLines([...scene.dialogue, { id: crypto.randomUUID(), speaker: "narrator", text: "", direction: "" }])}
+          onClick={() => setLines([...scene.dialogue, DialogueLineSchema.parse({})])}
         >
           + Line
         </Button>

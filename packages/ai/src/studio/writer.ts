@@ -4,7 +4,7 @@
 
 import { z } from "zod";
 import type { Character, Production, Scene, Shot } from "@frontstage/core";
-import { replaceDraftShots, updateScene, updateShot, updateStory, upsertCharacter, addScene } from "@frontstage/core";
+import { DialogueLineSchema, replaceDraftShots, updateScene, updateShot, updateStory, upsertCharacter, addScene } from "@frontstage/core";
 
 export const STUDIO_MODELS = [
   { id: "claude-opus-5-5", label: "Claude Opus 5.5" },
@@ -298,16 +298,21 @@ export function dialogueTask(p: Production, scene: Scene, model = DEFAULT_STUDIO
       model,
     ),
     parse: parser(DialogueZ),
+    // Like shot lists: lines that already have recordings are kept; only unrecorded lines are replaced.
     apply(p, r) {
-      const dialogue = r.lines.map((l) => ({
-        id: crypto.randomUUID(),
-        speaker: l.speaker.trim().toLowerCase() === "narrator" ? "narrator" : (findCharacter(p, l.speaker)?.id ?? l.speaker),
-        text: l.text,
-        direction: l.direction,
-      }));
-      return updateScene(p, scene.id, { dialogue, dialogueState: "draft" });
+      const current = p.scenes.find((s) => s.id === scene.id);
+      if (!current) return p;
+      const kept = current.dialogue.filter((l) => l.takes.length > 0);
+      const fresh = r.lines.map((l) =>
+        DialogueLineSchema.parse({
+          speaker: l.speaker.trim().toLowerCase() === "narrator" ? "narrator" : (findCharacter(p, l.speaker)?.id ?? l.speaker),
+          text: l.text,
+          direction: l.direction,
+        }),
+      );
+      return updateScene(p, scene.id, { dialogue: [...kept, ...fresh], dialogueState: "draft" });
     },
-    summary: (r) => `${r.lines.length} lines written (draft).`,
+    summary: (r) => `${r.lines.length} lines written (draft). Lines that already had recordings were kept.`,
   };
 }
 

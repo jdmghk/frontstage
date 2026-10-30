@@ -26,6 +26,8 @@ export * from "./generation-log.js";
 export * from "./production/production.js";
 export * from "./production/shot-placement.js";
 export * from "./production/library-character.js";
+export * from "./production/voice.js";
+export * from "./production/dialogue-placement.js";
 export * from "./volume-scale.js";
 export * from "./clip.js";
 export * from "./clip-settings.js";

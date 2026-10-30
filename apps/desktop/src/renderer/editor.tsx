@@ -34,7 +34,7 @@ import { DesktopAiGateway } from "./desktop-ai-gateway.js";
 import { DesktopGenGateway } from "./desktop-gen-gateway.js";
 import { DesktopMorphicBridge } from "./desktop-morphic.js";
 import { desktopClaudeGateway, desktopFlowExport } from "./desktop-studio.js";
-import { MorphicGateway, MorphicStudio, RoutingGenGateway, STUDIO_MODELS, DEFAULT_STUDIO_MODEL } from "@frontstage/ai";
+import { MorphicGateway, MorphicStudio, RoutingGenGateway, STUDIO_MODELS, DEFAULT_STUDIO_MODEL, VoiceStudio } from "@frontstage/ai";
 import type { StudioMorphic, StudioWriter } from "@frontstage/ui";
 import { makeDesktopAudioExtractor } from "./desktop-audio-extract.js";
 import { createDesktopMediaImport } from "./desktop-media-import.js";
@@ -231,6 +231,17 @@ const generationFacade = {
   uploadFile: (bytes: Uint8Array, contentType: string, fileName: string) =>
     genGateway.uploadFile(bytes, contentType, fileName),
 };
+
+// Dialogue speech (fal-hosted Chatterbox) through the same generation pipeline and fal key.
+const voiceStudio = new VoiceStudio({
+  generation: {
+    hasKey: () => genGateway.hasKey(),
+    addPlaceholder: (entry) => library.addPlaceholder(entry),
+    startJob: (args) => generationServiceRef.current.startJob(args),
+  },
+  entryUrl,
+  newId: () => crypto.randomUUID(),
+});
 
 // Delegates through the ref (not a captured instance) so any future recreate is picked up.
 const transcriptionFacade = {
@@ -532,6 +543,7 @@ function FrontstageDesktopApp() {
       morphic={morphic}
       writer={anthropicHasKey ? writer : undefined}
       flowExport={desktopFlowExport}
+      voice={falHasKey ? voiceStudio : undefined}
       agent={{
         session: agentSession,
         model: agentModelId,

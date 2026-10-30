@@ -1756,10 +1756,11 @@ ipcMain.handle("claude:run", async (_e, req) => {
   return _claudeStudioMod.runClaudeStudio(loadKey("anthropic"), req);
 });
 
-// Flow hand-off: writes the pack's text files and reference images into <chosen dir>/<folderName>.
+// Writes a folder of text files + binary files into <chosen dir>/<folderName>: the Google Flow
+// hand-off pack and the Voice tab's approved-dialogue export.
 ipcMain.handle("studio:writeFlowPack", async (e, { folderName, files, images }) => {
   const win = BrowserWindow.fromWebContents(e.sender);
-  const pick = await dialog.showOpenDialog(win, { title: "Choose where to save the Google Flow hand-off", properties: ["openDirectory", "createDirectory"] });
+  const pick = await dialog.showOpenDialog(win, { title: `Choose where to save "${folderName}"`, properties: ["openDirectory", "createDirectory"] });
   if (pick.canceled || !pick.filePaths[0]) return { canceled: true };
   // One path segment: no separators, reserved or control characters, never "." or "..".
   const safeName = (n) => typeof n === "string" && /^[^\\/:*?"<>|\x00-\x1f]{1,120}$/.test(n) && n.trim() !== "" && n !== "." && n !== "..";
@@ -1774,6 +1775,6 @@ ipcMain.handle("studio:writeFlowPack", async (e, { folderName, files, images }) 
     if (!safeName(img.name)) return { error: `invalid file name: ${img.name}` };
     fs.writeFileSync(path.join(dir, img.name), Buffer.from(img.bytes));
   }
-  shell.showItemInFolder(path.join(dir, "prompt.txt"));
+  void shell.openPath(dir);
   return { path: dir };
 });

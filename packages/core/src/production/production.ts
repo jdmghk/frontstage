@@ -46,6 +46,38 @@ export const DialogueLineSchema = z.object({
   text: z.string().default(""),
   /** Delivery note for the voice (e.g. "whispered, out of breath"). */
   direction: z.string().default(""),
+  /** The shot this line plays over; placement starts at that shot's clip. */
+  shotId: z.string().optional(),
+  /** Generated recordings (media-library ids); one can be approved. */
+  takes: z.array(z.string()).default([]),
+  approvedTakeId: z.string().optional(),
+  timelineClipId: z.string().optional(),
+  status: z.enum(["draft", "generating", "generated", "approved", "failed"]).default("draft"),
+  lastError: z.string().optional(),
+});
+
+/** Languages Chatterbox Multilingual accepts for a reference voice. */
+export const VOICE_LANGUAGES = [
+  "english", "arabic", "danish", "german", "greek", "spanish", "finnish", "french", "hebrew", "hindi", "italian", "japanese",
+  "korean", "malay", "dutch", "norwegian", "polish", "portuguese", "russian", "swedish", "swahili", "turkish", "chinese",
+] as const;
+
+/**
+ * A reusable voice made from a reference recording. The consent record is required: a profile is
+ * only created when the user confirms the voice is theirs or they have the speaker's permission.
+ */
+export const VoiceProfileSchema = z.object({
+  id: z.string().default(uuid),
+  name: z.string().min(1),
+  referenceMediaId: z.string(),
+  language: z.enum(VOICE_LANGUAGES).default("english"),
+  /** 0.25–2; 0.5 is neutral. */
+  expressiveness: z.number().min(0.25).max(2).default(0.5),
+  consent: z.object({
+    attested: z.literal(true),
+    note: z.string().default(""),
+    date: z.string(),
+  }),
 });
 
 export const SceneSchema = z.object({
@@ -92,6 +124,8 @@ export const StorySchema = z.object({
 export const ProductionSchema = z.object({
   version: z.number().default(1),
   story: StorySchema.default({}),
+  voices: z.array(VoiceProfileSchema).default([]),
+  narratorVoiceId: z.string().optional(),
   scenes: z.array(SceneSchema).default([]),
   characters: z.array(CharacterSchema).default([]),
 });
@@ -103,6 +137,8 @@ export type Take = z.infer<typeof TakeSchema>;
 export type Shot = z.infer<typeof ShotSchema>;
 export type Scene = z.infer<typeof SceneSchema>;
 export type DialogueLine = z.infer<typeof DialogueLineSchema>;
+export type VoiceProfile = z.infer<typeof VoiceProfileSchema>;
+export type VoiceLanguage = (typeof VOICE_LANGUAGES)[number];
 export type Story = z.infer<typeof StorySchema>;
 export type CharacterAppearance = z.infer<typeof CharacterAppearanceSchema>;
 export type Character = z.infer<typeof CharacterSchema>;
@@ -385,5 +421,31 @@ export function dropMediaRefs(p: Production, mediaIds: ReadonlySet<string>): Pro
     changed = true;
     return { ...c, referenceMediaIds, approvedDesignIds };
   });
-  return changed ? { ...p, scenes, characters } : p;
+  // Dialogue takes follow the same rule as shot takes; a voice whose reference is gone is removed.
+  const scenes2 = scenes.map((scene) => {
+    if (!scene.dialogue.some((l) => l.takes.some((t) => !keep(t)))) return scene;
+    changed = true;
+    return {
+      ...scene,
+      dialogue: scene.dialogue.map((l) => {
+        const takes = l.takes.filter(keep);
+        if (takes.length === l.takes.length) return l;
+        const approvedGone = l.approvedTakeId !== undefined && !keep(l.approvedTakeId);
+        return { ...l, takes, approvedTakeId: approvedGone ? undefined : l.approvedTakeId, status: approvedGone ? (takes.length ? "generated" as const : "draft" as const) : l.status };
+      }),
+    };
+  });
+  const voices = p.voices.filter((v) => keep(v.referenceMediaId));
+  if (voices.length !== p.voices.length) {
+    changed = true;
+    const gone = new Set(p.voices.filter((v) => !keep(v.referenceMediaId)).map((v) => v.id));
+    return {
+      ...p,
+      scenes: scenes2,
+      voices,
+      narratorVoiceId: p.narratorVoiceId && gone.has(p.narratorVoiceId) ? undefined : p.narratorVoiceId,
+      characters: characters.map((c) => (c.voiceProfileId && gone.has(c.voiceProfileId) ? { ...c, voiceProfileId: undefined } : c)),
+    };
+  }
+  return changed ? { ...p, scenes: scenes2, characters } : p;
 }

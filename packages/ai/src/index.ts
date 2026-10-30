@@ -147,3 +147,5 @@ export {
 } from "./studio/writer.js";
 export type { FlowPack } from "./studio/flow-handoff.js";
 export { buildFlowPack, FLOW_MAX_REFERENCES } from "./studio/flow-handoff.js";
+export type { VoiceStudioDeps, VoiceStartResult } from "./studio/voice-studio.js";
+export { VoiceStudio, chatterboxInput, CHATTERBOX_ENDPOINT, CHATTERBOX_MAX_CHARS } from "./studio/voice-studio.js";

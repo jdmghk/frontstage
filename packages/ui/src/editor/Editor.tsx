@@ -6,6 +6,7 @@ import type { MentionItem } from "../agent/MentionInput.js";
 import { SettingsPanel } from "../agent/SettingsPanel.js";
 import type { KeyConfig, FalKeyConfig, McpSettings, RelayConfig, ClaudeSettings } from "../agent/SettingsPanel.js";
 import type { FlowExport, StudioWriter } from "../production/writer-ui.js";
+import type { StudioVoice } from "../production/VoiceTab.js";
 import type { SkillsPaneProps } from "../skills/SkillsPane.js";
 import { ProjectActivityButton } from "./ProjectActivityView.js";
 import {
@@ -131,6 +132,8 @@ export interface EditorProps {
   // Claude writing and the Google Flow hand-off for the Production tab. Omitted -> hidden.
   writer?: StudioWriter;
   flowExport?: FlowExport;
+  // Dialogue speech generation for the Voice tab. Omitted -> lines can be set up but not generated.
+  voice?: StudioVoice;
 }
 
 interface DiscardDialogState {
@@ -139,7 +142,7 @@ interface DiscardDialogState {
 
 export type RunProjectCommand = (fn: () => Promise<unknown>) => void;
 
-export function Editor({ store, media, library, session, nativeFileMenu, exportGateway, interopExport, engineRef, onReady, agent, getGenerationLog, indexing, relayAuth, waveformCache: waveformCacheProp, production, characterLibrary, morphic, writer, flowExport }: EditorProps) {
+export function Editor({ store, media, library, session, nativeFileMenu, exportGateway, interopExport, engineRef, onReady, agent, getGenerationLog, indexing, relayAuth, waveformCache: waveformCacheProp, production, characterLibrary, morphic, writer, flowExport, voice }: EditorProps) {
   const dragController = useMemo(() => new MediaDragController(), []);
   const ownedWaveformCache = useMemo(() => new WaveformCache(), []);
   const waveformCache = waveformCacheProp ?? ownedWaveformCache;
@@ -575,6 +578,7 @@ export function Editor({ store, media, library, session, nativeFileMenu, exportG
             morphic={morphic}
             writer={writer}
             flowExport={flowExport}
+            voice={voice}
             onItemPointerDown={(entry, e) => {
               e.preventDefault();
               dragController.start(entry, e.clientX, e.clientY, e.metaKey || e.ctrlKey);
