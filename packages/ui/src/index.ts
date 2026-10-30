@@ -72,6 +72,8 @@ export type { StudioMorphic, MorphicAccount } from "./production/morphic.js";
 export type { StudioWriter, FlowExport } from "./production/writer-ui.js";
 export { VoiceTab } from "./production/VoiceTab.js";
 export type { StudioVoice, VoiceTabProps } from "./production/VoiceTab.js";
+export { ChoreoTab } from "./production/ChoreoTab.js";
+export type { FrameSampler, ChoreoTabProps } from "./production/ChoreoTab.js";
 export type { EditorMediaHost, EditorHostResult } from "./editor/editor-host.js";
 export type { ExportGateway, ExportTarget, ExportProgressFn, ExportRunOptions } from "./editor/export-gateway.js";
 export type { ExportState, ExportKind, FcpxmlExportOptions } from "./editor/use-export-command.js";

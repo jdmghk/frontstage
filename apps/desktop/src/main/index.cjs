@@ -1778,3 +1778,16 @@ ipcMain.handle("studio:writeFlowPack", async (e, { folderName, files, images }) 
   void shell.openPath(dir);
   return { path: dir };
 });
+
+// ── Choreography frame sampling (Studio, Phase 5) ──────────────────────────
+let _frameSamplerMod = null;
+ipcMain.handle("media:sampleFrames", async (_e, req) => {
+  if (!_frameSamplerMod) _frameSamplerMod = await import("./frame-sampler.mjs");
+  const ffmpegPath = resolveFfmpegPath();
+  if (!ffmpegPath) return { error: "ffmpeg is not available" };
+  try {
+    return { frames: await _frameSamplerMod.sampleFrames(ffmpegPath, req) };
+  } catch (err) {
+    return { error: String(err && err.message ? err.message : err) };
+  }
+});

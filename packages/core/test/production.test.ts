@@ -36,7 +36,7 @@ function twoScenes(): { p: Production; s1: string; s2: string; a: string; b: str
 
 describe("production schema", () => {
   test("parses an empty object to defaults", () => {
-    expect(ProductionSchema.parse({})).toEqual({ version: 1, story: { idea: "", logline: "", outline: "", outlineState: "draft" }, voices: [], scenes: [], characters: [] });
+    expect(ProductionSchema.parse({})).toEqual({ version: 1, story: { idea: "", logline: "", outline: "", outlineState: "draft" }, voices: [], choreographies: [], scenes: [], characters: [] });
   });
 
   test("fills shot defaults and keeps unknown-free round trip", () => {

@@ -18,6 +18,7 @@ import type { CharacterLibrary } from "../production/character-library.js";
 import type { StudioMorphic } from "../production/morphic.js";
 import type { FlowExport, StudioWriter } from "../production/writer-ui.js";
 import { VoiceTab, type StudioVoice } from "../production/VoiceTab.js";
+import { ChoreoTab, type FrameSampler } from "../production/ChoreoTab.js";
 
 const MODEL_LABEL: Record<MissingModel, string> = { embedding: "Search model", transcription: "Transcription model" };
 // Downloaded in this fixed order regardless of Set iteration order — embedding is the older/
@@ -79,9 +80,10 @@ export interface MediaPanelProps {
   writer?: StudioWriter;
   flowExport?: FlowExport;
   voice?: StudioVoice;
+  sampleFrames?: FrameSampler;
 }
 
-type PanelTab = "media" | "captions" | "production" | "characters" | "voice";
+type PanelTab = "media" | "captions" | "production" | "characters" | "voice" | "choreo";
 
 // Swift's PanelTab has a third case (.music) — deliberately unported here (recorded deviation).
 const MEDIA_PANEL_TABS: { id: PanelTab; label: string; icon: IconName }[] = [
@@ -90,8 +92,9 @@ const MEDIA_PANEL_TABS: { id: PanelTab; label: string; icon: IconName }[] = [
   { id: "production", label: "Production", icon: "clapper" },
   { id: "characters", label: "Characters", icon: "person" },
   { id: "voice", label: "Voice", icon: "mic" },
+  { id: "choreo", label: "Choreo", icon: "choreo" },
 ];
-const PRODUCTION_TABS: ReadonlySet<PanelTab> = new Set(["production", "characters", "voice"]);
+const PRODUCTION_TABS: ReadonlySet<PanelTab> = new Set(["production", "characters", "voice", "choreo"]);
 
 // Characters need byte read/write for the cross-project library; hosts whose library lacks them
 // still get the tab, and only the library actions fail with a clear message.
@@ -115,7 +118,7 @@ const TAB_ICON_SIZE = 18;
 const HEADER_ICON_SIZE = 10;
 const OVERFLOW_ICON_FRAME = "sm" as const;
 
-export function MediaPanel({ library, onItemPointerDown, store, executor, transcription, indexing, dragOverFolderId, production, characterLibrary, morphic, writer, flowExport, voice }: MediaPanelProps) {
+export function MediaPanel({ library, onItemPointerDown, store, executor, transcription, indexing, dragOverFolderId, production, characterLibrary, morphic, writer, flowExport, voice, sampleFrames }: MediaPanelProps) {
   const panelTabs = production ? MEDIA_PANEL_TABS : MEDIA_PANEL_TABS.filter((t) => !PRODUCTION_TABS.has(t.id));
   const indexStatus = useSyncExternalStore(
     indexing?.subscribe ?? noopSubscribe,
@@ -628,6 +631,8 @@ export function MediaPanel({ library, onItemPointerDown, store, executor, transc
         </>
       ) : tab === "production" && production ? (
         <ProductionTab production={production} library={library} store={store} morphic={morphic} writer={writer} flowExport={flowExport} />
+      ) : tab === "choreo" && production ? (
+        <ChoreoTab production={production} library={library} writer={writer} sampleFrames={sampleFrames} />
       ) : tab === "voice" && production ? (
         <VoiceTab production={production} library={library} store={store} voice={voice} exportFolder={flowExport} />
       ) : tab === "characters" && production ? (

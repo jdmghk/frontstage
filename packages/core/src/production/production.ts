@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ChoreographySchema } from "./choreography.js";
 
 const uuid = () => crypto.randomUUID();
 
@@ -126,6 +127,7 @@ export const ProductionSchema = z.object({
   story: StorySchema.default({}),
   voices: z.array(VoiceProfileSchema).default([]),
   narratorVoiceId: z.string().optional(),
+  choreographies: z.array(z.lazy(() => ChoreographySchema)).default([]),
   scenes: z.array(SceneSchema).default([]),
   characters: z.array(CharacterSchema).default([]),
 });

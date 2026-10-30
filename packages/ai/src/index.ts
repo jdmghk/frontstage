@@ -149,3 +149,5 @@ export type { FlowPack } from "./studio/flow-handoff.js";
 export { buildFlowPack, FLOW_MAX_REFERENCES } from "./studio/flow-handoff.js";
 export type { VoiceStudioDeps, VoiceStartResult } from "./studio/voice-studio.js";
 export { VoiceStudio, chatterboxInput, CHATTERBOX_ENDPOINT, CHATTERBOX_MAX_CHARS } from "./studio/voice-studio.js";
+export type { SampledFrame } from "./studio/choreography-task.js";
+export { choreographyTask, choreoSampleFps, MAX_CHOREO_FRAMES } from "./studio/choreography-task.js";

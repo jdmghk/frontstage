@@ -7,6 +7,7 @@ import { SettingsPanel } from "../agent/SettingsPanel.js";
 import type { KeyConfig, FalKeyConfig, McpSettings, RelayConfig, ClaudeSettings } from "../agent/SettingsPanel.js";
 import type { FlowExport, StudioWriter } from "../production/writer-ui.js";
 import type { StudioVoice } from "../production/VoiceTab.js";
+import type { FrameSampler } from "../production/ChoreoTab.js";
 import type { SkillsPaneProps } from "../skills/SkillsPane.js";
 import { ProjectActivityButton } from "./ProjectActivityView.js";
 import {
@@ -134,6 +135,8 @@ export interface EditorProps {
   flowExport?: FlowExport;
   // Dialogue speech generation for the Voice tab. Omitted -> lines can be set up but not generated.
   voice?: StudioVoice;
+  // Frame sampling for choreography analysis (desktop ffmpeg). Omitted -> analysis hidden.
+  sampleFrames?: FrameSampler;
 }
 
 interface DiscardDialogState {
@@ -142,7 +145,7 @@ interface DiscardDialogState {
 
 export type RunProjectCommand = (fn: () => Promise<unknown>) => void;
 
-export function Editor({ store, media, library, session, nativeFileMenu, exportGateway, interopExport, engineRef, onReady, agent, getGenerationLog, indexing, relayAuth, waveformCache: waveformCacheProp, production, characterLibrary, morphic, writer, flowExport, voice }: EditorProps) {
+export function Editor({ store, media, library, session, nativeFileMenu, exportGateway, interopExport, engineRef, onReady, agent, getGenerationLog, indexing, relayAuth, waveformCache: waveformCacheProp, production, characterLibrary, morphic, writer, flowExport, voice, sampleFrames }: EditorProps) {
   const dragController = useMemo(() => new MediaDragController(), []);
   const ownedWaveformCache = useMemo(() => new WaveformCache(), []);
   const waveformCache = waveformCacheProp ?? ownedWaveformCache;
@@ -579,6 +582,7 @@ export function Editor({ store, media, library, session, nativeFileMenu, exportG
             writer={writer}
             flowExport={flowExport}
             voice={voice}
+            sampleFrames={sampleFrames}
             onItemPointerDown={(entry, e) => {
               e.preventDefault();
               dragController.start(entry, e.clientX, e.clientY, e.metaKey || e.ctrlKey);

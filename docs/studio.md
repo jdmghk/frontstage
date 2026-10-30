@@ -1,8 +1,8 @@
 # Production studio
 
 Frontstage extensions for producing AI-generated YouTube videos: scenes and shots, reusable
-characters, Morphic generation, Claude writing and a Google Flow hand-off (desktop), and (in later
-phases) voice and choreography. Everything lives inside the existing editor — two new tabs on the media panel's left
+characters, Morphic generation, Claude writing, a Google Flow hand-off, a voice studio and fight
+choreography planning. Everything lives inside the existing editor — two new tabs on the media panel's left
 rail, no separate dashboard.
 
 ## Feature status
@@ -37,7 +37,10 @@ rail, no separate dashboard.
 | Generate, play, regenerate one line | **Implemented** (desktop + web with a fal key) | Voice tab → line → **Generate** / **Regenerate**; every take is kept, approve one. fal-hosted Chatterbox Multilingual, $0.025 per 1,000 characters, 23 languages, 300 characters per line |
 | Place dialogue on the timeline | **Implemented** | **Place on timeline** puts the approved take on an audio track under its shot (or the scene's first shot), after the previous line; **Replace on timeline** swaps just that clip |
 | Export approved dialogue | **Implemented** (desktop) | Voice tab → **Export approved…** writes one audio file per line + `lines.txt` |
-| Fight choreography | Not yet | Phase 5 |
+| Fight choreography: reference import (permission required) | **Implemented** (Phase 5) | Media panel → **Choreo** tab → **+ Reference** |
+| Fight choreography: frame sampling + Claude shot plan | **Implemented** (desktop) | **Analyze** samples ≤20 frames with the bundled ffmpeg and asks Claude for shots: positions, action, camera, framing, transitions, impact times, continuity, prompt |
+| Fight choreography: edit, approve → scene shots | **Implemented** | Edit every field; **Approve → add shots** appends them to the chosen scene as draft shots |
+| Motion transfer from the reference | Not supported | The plan describes the moves; no current integrated generator copies the reference's motion |
 | YouTube export presets | Not yet | Phase 6 |
 
 ## How it's stored
@@ -102,6 +105,22 @@ ten minutes of continuous speech, roughly 9,000 characters, before retakes). Res
 
 A cloned voice resembles the reference but isn't identical; expressiveness and pacing vary per take.
 
+## Fight choreography
+
+1. **Choreo → + Reference**: pick a video you own or have permission to use and confirm that (saved
+   with the plan, dated). Short clips (under ~20 s) work best.
+2. **Notes for the analysis**: who is who ("fighter in red = Kai") and what to focus on.
+3. **Analyze** (desktop + Anthropic key): up to 20 frames are sampled evenly with the bundled ffmpeg
+   (in memory, nothing is written) and sent to Claude with the notes. The project must be saved so
+   the video is on disk.
+4. Edit the shot plan (duration, cast, starting positions, action, camera, framing, transition, impact
+   times, continuity, prompt). Any edit returns it to draft.
+5. Choose a scene and **Approve → add shots**: each planned shot becomes a draft shot in that scene,
+   with matching cast linked; generate them from the Production tab like any other shot.
+
+This is analysis, not motion transfer: generators get a precise description and the cast's
+references, and the result will differ from the reference footage.
+
 ## Using it
 
 1. **Characters tab** → **+ Character**. Fill in appearance, **Add reference images…**, and click
@@ -127,6 +146,10 @@ character in every clip.
   `src/project/project-session.test.ts`
 - UI: `packages/ui/test/production-store.test.ts`, `character-library.test.ts`, `production-tab.test.tsx`
 - Desktop fs: `apps/desktop/test/characters-fs.test.ts`
+- Voice: `packages/core/test/voice.test.ts`, `dialogue-placement.test.ts`, `packages/ai/test/voice-studio.test.ts`,
+  `packages/ui/test/voice-tab.test.tsx`
+- Choreography: `packages/core/test/choreography.test.ts`, `packages/ai/test/choreography-task.test.ts`,
+  `apps/desktop/test/frame-sampler.test.ts`, `packages/ui/test/choreo-tab.test.tsx`
 - Claude + Flow: `packages/ai/test/studio-writer.test.ts` (schemas, apply rules, refusal, wrong-shape
   replies, Flow pack), `apps/desktop/test/claude-studio.test.ts` (request checks, fallbacks, error
   mapping), Claude/Flow cases in `packages/ui/test/production-tab.test.tsx`

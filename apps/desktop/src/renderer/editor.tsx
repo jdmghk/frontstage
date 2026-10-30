@@ -33,7 +33,7 @@ import { DesktopExportGateway } from "./desktop-export-gateway.js";
 import { DesktopAiGateway } from "./desktop-ai-gateway.js";
 import { DesktopGenGateway } from "./desktop-gen-gateway.js";
 import { DesktopMorphicBridge } from "./desktop-morphic.js";
-import { desktopClaudeGateway, desktopFlowExport } from "./desktop-studio.js";
+import { desktopClaudeGateway, desktopFlowExport, makeDesktopFrameSampler } from "./desktop-studio.js";
 import { MorphicGateway, MorphicStudio, RoutingGenGateway, STUDIO_MODELS, DEFAULT_STUDIO_MODEL, VoiceStudio } from "@frontstage/ai";
 import type { StudioMorphic, StudioWriter } from "@frontstage/ui";
 import { makeDesktopAudioExtractor } from "./desktop-audio-extract.js";
@@ -242,6 +242,8 @@ const voiceStudio = new VoiceStudio({
   entryUrl,
   newId: () => crypto.randomUUID(),
 });
+
+const frameSampler = makeDesktopFrameSampler(resolveMediaPath);
 
 // Delegates through the ref (not a captured instance) so any future recreate is picked up.
 const transcriptionFacade = {
@@ -544,6 +546,7 @@ function FrontstageDesktopApp() {
       writer={anthropicHasKey ? writer : undefined}
       flowExport={desktopFlowExport}
       voice={falHasKey ? voiceStudio : undefined}
+      sampleFrames={anthropicHasKey ? frameSampler : undefined}
       agent={{
         session: agentSession,
         model: agentModelId,

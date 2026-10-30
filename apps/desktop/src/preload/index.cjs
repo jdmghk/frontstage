@@ -95,6 +95,7 @@ contextBridge.exposeInMainWorld("desktopCharacters", {
 contextBridge.exposeInMainWorld("desktopStudio", {
   claudeRun: (req) => ipcRenderer.invoke("claude:run", req),
   writeFlowPack: (pack) => ipcRenderer.invoke("studio:writeFlowPack", pack),
+  sampleFrames: (req) => ipcRenderer.invoke("media:sampleFrames", req),
 });
 
 contextBridge.exposeInMainWorld("desktopMorphic", {
