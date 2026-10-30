@@ -45,7 +45,7 @@ rail, no separate dashboard.
 | Export presets in the web editor | Not yet | The web encoder is fixed H.264 Baseline at 5 Mbps; 4K isn't possible there |
 | Per-track volume | **Implemented** | Audio track header dB field (-60…+12), on top of each clip's volume; applies to preview and export; undoable |
 | Cross-dissolve | **Implemented** | Inspector → Transition → **Cross-dissolve from previous clip**: the clip moves to a track above and fades in over the previous one; nothing else moves. Needs spare footage on one side (it says how much) |
-| Other transition types (wipes, slides) | Not supported | Dissolve plus the existing fades only |
+| Slide and wipe transitions | **Implemented** | Inspector → Transition → *Slide in* / *Wipe* + direction; built from position / crop keyframes on the incoming clip, same no-ripple rules as the dissolve |
 | Automatic retry of generation jobs | **Implemented** | A submit refused with 429/502/503/504 is retried up to 3 times with backoff (never a network error, which may have started the job); up to 3 consecutive failed status checks are tolerated |
 | Subtitles | Existing feature | Captions tab: Whisper transcription, caption clips burned into the export, SRT/VTT export (File → Captions) for YouTube upload |
 | Captions as an embedded subtitle track | **Implemented** (desktop) | Export dialog checkbox *Captions as a subtitle track…*: captions are left out of the picture and muxed into the MP4 as a switchable `mov_text` track (checked with ffprobe) |
@@ -132,8 +132,8 @@ references, and the result will differ from the reference footage.
 
 1. **Mix**: name audio tracks (double-click the name) e.g. *Dialogue*, *Music*, *SFX*, and set each
    track's level in dB in its header; clip volume and fades still work per clip.
-2. **Transitions**: select the second of two adjacent clips → Inspector → Transition → set frames →
-   **Cross-dissolve from previous clip**. One undo removes it.
+2. **Transitions**: select the second of two adjacent clips → Inspector → Transition → choose Dissolve,
+   Slide in or Wipe (and a direction) → set frames → **Add transition from previous clip**. One undo removes it.
 3. **Captions**: Captions tab → transcribe → style; they're burned into the video. For YouTube's own
    captions, File → **Captions (SRT)…** and upload the file next to the video.
 4. **Export**: File → Export Video → pick **YouTube 1080p** or **YouTube 4K** → choose where to save.

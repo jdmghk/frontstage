@@ -9,19 +9,19 @@ import {
   setClipCropCommand,
   setClipPropertyCommand,
   setFadeCommand,
-  crossDissolveCommand,
-  planCrossDissolve,
+  planTransition,
+  transitionCommand,
   setKeyframeCommand,
   setClipTextStyleCommand,
   setClipTextFillModeCommand,
   defaultTextStyle,
   rgbaFromHex,
 } from "@frontstage/core";
-import type { Clip, Transform, Crop, TextStyle, TextFillMode } from "@frontstage/core";
+import type { Clip, Transform, Crop, TextStyle, TextFillMode, TransitionEdge, TransitionKind } from "@frontstage/core";
 import type { PlaybackEngine } from "@frontstage/engine";
 import { useStore } from "../store/use-store.js";
 import { theme } from "../theme/theme.js";
-import { Button, SegmentedTabs } from "../primitives/index.js";
+import { Button, SegmentedTabs, Select } from "../primitives/index.js";
 import { NumberField, SliderField, ToggleField, TextField, Section, rowStyle, labelStyle } from "./fields.js";
 import { KeyframeLanes } from "./KeyframeLanes.js";
 import { BasicCorrectionSection } from "./adjust/BasicCorrectionSection.js";
@@ -501,25 +501,44 @@ export function InspectorPanel({ store, library, engineRef, lutReconciler }: Ins
   );
 }
 
-/** Cross-dissolve from the clip before this one (same track): this clip moves up a track and fades in over it. */
+/** Transition from the clip before this one (same track): this clip moves up a track and makes its entrance over it. */
+const TRANSITION_TYPES: { value: "dissolve" | "slide" | "wipe"; label: string }[] = [
+  { value: "dissolve", label: "Dissolve" },
+  { value: "slide", label: "Slide in" },
+  { value: "wipe", label: "Wipe" },
+];
+const EDGES: { value: TransitionEdge; label: string }[] = [
+  { value: "left", label: "from left" },
+  { value: "right", label: "from right" },
+  { value: "top", label: "from top" },
+  { value: "bottom", label: "from bottom" },
+];
+
 function DissolveSection({ store, clip, fps }: { store: EditorStore; clip: Clip; fps: number }) {
   const [frames, setFrames] = useState(() => Math.round(fps / 2));
+  const [type, setType] = useState<"dissolve" | "slide" | "wipe">("dissolve");
+  const [edge, setEdge] = useState<TransitionEdge>("right");
   const [message, setMessage] = useState<string | null>(null);
   useEffect(() => setMessage(null), [clip.id]);
+  const kind: TransitionKind = type === "dissolve" ? { type } : { type, from: edge };
   return (
     <Section title="Transition">
-      <NumberField label="Dissolve frames" value={frames} step={1} min={1} onChange={(v) => setFrames(Math.max(1, Math.round(v)))} />
+      <div style={{ ...rowStyle, gap: theme.spacing.xs }}>
+        <Select value={type} options={TRANSITION_TYPES} onChange={setType} testid="inspector-transition-type" />
+        {type !== "dissolve" && <Select value={edge} options={EDGES} onChange={setEdge} testid="inspector-transition-edge" />}
+      </div>
+      <NumberField label="Transition frames" value={frames} step={1} min={1} onChange={(v) => setFrames(Math.max(1, Math.round(v)))} />
       <Button
         size="small"
         testid="inspector-cross-dissolve"
         onClick={() => {
-          const plan = planCrossDissolve(store.getSnapshot().timeline, clip.id, frames);
+          const plan = planTransition(store.getSnapshot().timeline, clip.id, frames, kind);
           if (!plan.ok) return setMessage(plan.message);
-          store.dispatch(crossDissolveCommand(clip.id, frames));
-          setMessage(`Dissolves in over ${frames} frames (${(frames / fps).toFixed(2)} s).`);
+          store.dispatch(transitionCommand(clip.id, frames, kind));
+          setMessage(`Added over ${frames} frames (${(frames / fps).toFixed(2)} s).`);
         }}
       >
-        Cross-dissolve from previous clip
+        Add transition from previous clip
       </Button>
       {message && (
         <div data-testid="inspector-cross-dissolve-message" style={{ ...labelStyle, whiteSpace: "normal" }}>

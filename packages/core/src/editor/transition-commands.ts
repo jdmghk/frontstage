@@ -1,13 +1,21 @@
-// Cross-dissolve between two adjacent clips on one video track, built from the existing fade:
-// the incoming clip moves to a track above (index 0 draws on top), overlaps the outgoing clip by
-// `frames`, and fades in over it. No other clip moves, so dialogue and music stay in sync.
+// Transitions between two adjacent clips on one video track — dissolve (fade), slide (position
+// keyframes) and wipe (crop keyframes), all built from existing clip properties: the incoming clip
+// moves to a track above (index 0 draws on top), overlaps the outgoing clip by `frames` and makes
+// its entrance over it. No other clip moves, so dialogue and music stay in sync.
 //
 // The overlap needs spare footage: preferably the outgoing clip's unused tail (it extends under the
 // incoming clip), otherwise the incoming clip's unused head (it starts earlier, with its linked
 // clips). Stills always have spare frames. With no spare footage the command is refused.
 
 import type { Command } from "./editor-store.js";
-import type { Clip } from "../clip.js";
+import { cropAt, topLeftAt, type Clip } from "../clip.js";
+
+/** Dissolve fades the incoming clip in; slide moves it in from an edge; wipe reveals it from an edge. */
+export type TransitionKind =
+  | { type: "dissolve" }
+  | { type: "slide"; from: TransitionEdge }
+  | { type: "wipe"; from: TransitionEdge };
+export type TransitionEdge = "left" | "right" | "top" | "bottom";
 import { findClip, type Timeline, type Track } from "../timeline.js";
 
 export type DissolvePlan =
@@ -27,6 +35,10 @@ function outgoingOf(timeline: Timeline, incomingId: string): { track: Track; tra
 }
 
 export function planCrossDissolve(timeline: Timeline, incomingClipId: string, frames: number): DissolvePlan {
+  return planTransition(timeline, incomingClipId, frames, { type: "dissolve" });
+}
+
+export function planTransition(timeline: Timeline, incomingClipId: string, frames: number, kind: TransitionKind): DissolvePlan {
   const found = outgoingOf(timeline, incomingClipId);
   if (!found) return { ok: false, message: "Select a clip that directly follows another clip on the same track." };
   const { track, a, b } = found;
@@ -34,7 +46,9 @@ export function planCrossDissolve(timeline: Timeline, incomingClipId: string, fr
   if (a.speed !== 1 || b.speed !== 1) return { ok: false, message: "Reset clip speed to 100% before adding a dissolve." };
   const d = Math.round(frames);
   if (d < 1) return { ok: false, message: "The dissolve needs at least one frame." };
-  if (d > Math.floor(Math.min(a.durationFrames, b.durationFrames) / 2)) return { ok: false, message: "The dissolve is longer than half of one of the clips." };
+  if (d > Math.floor(Math.min(a.durationFrames, b.durationFrames) / 2)) return { ok: false, message: "The transition is longer than half of one of the clips." };
+  if (kind.type === "slide" && b.positionTrack?.keyframes.length) return { ok: false, message: "This clip already has position keyframes; remove them to add a slide." };
+  if (kind.type === "wipe" && b.cropTrack?.keyframes.length) return { ok: false, message: "This clip already has crop keyframes; remove them to add a wipe." };
   if (isStill(a) || a.trimEndFrame >= d) return { ok: true, mode: "outgoing-tail", frames: d };
   if ((isStill(b) || b.trimStartFrame >= d) && !hasKeyframes(b)) return { ok: true, mode: "incoming-head", frames: d };
   return {
@@ -48,10 +62,57 @@ function overlaps(track: Track, start: number, end: number, ignore: Set<string>)
 }
 
 export function crossDissolveCommand(incomingClipId: string, frames: number, newId: () => string = () => crypto.randomUUID()): Command {
+  return transitionCommand(incomingClipId, frames, { type: "dissolve" }, newId);
+}
+
+const OFFSET: Record<TransitionEdge, { x: number; y: number }> = {
+  left: { x: -1, y: 0 },
+  right: { x: 1, y: 0 },
+  top: { x: 0, y: -1 },
+  bottom: { x: 0, y: 1 },
+};
+
+/** The incoming clip's entrance over its first `d` frames (keyframes are relative to clip start). */
+function withEntrance(c: Clip, d: number, kind: TransitionKind): Clip {
+  if (kind.type === "dissolve") return { ...c, fadeInFrames: d };
+  if (kind.type === "slide") {
+    const end = topLeftAt(c, c.startFrame);
+    const o = OFFSET[kind.from];
+    return {
+      ...c,
+      positionTrack: {
+        keyframes: [
+          { frame: 0, value: { a: end.x + o.x, b: end.y + o.y }, interpolationOut: "smooth" },
+          { frame: d, value: { a: end.x, b: end.y }, interpolationOut: "linear" },
+        ],
+      },
+    };
+  }
+  // Wipe: the edge opposite the reveal starts fully cropped and opens to the clip's own crop.
+  const end = cropAt(c, c.startFrame);
+  const start = { ...end };
+  if (kind.from === "left") start.right = 1 - end.left;
+  if (kind.from === "right") start.left = 1 - end.right;
+  if (kind.from === "top") start.bottom = 1 - end.top;
+  if (kind.from === "bottom") start.top = 1 - end.bottom;
   return {
-    label: "Cross Dissolve",
+    ...c,
+    cropTrack: {
+      keyframes: [
+        { frame: 0, value: start, interpolationOut: "linear" },
+        { frame: d, value: end, interpolationOut: "linear" },
+      ],
+    },
+  };
+}
+
+const LABEL: Record<TransitionKind["type"], string> = { dissolve: "Cross Dissolve", slide: "Slide Transition", wipe: "Wipe Transition" };
+
+export function transitionCommand(incomingClipId: string, frames: number, kind: TransitionKind, newId: () => string = () => crypto.randomUUID()): Command {
+  return {
+    label: LABEL[kind.type],
     apply(timeline: Timeline): Timeline {
-      const plan = planCrossDissolve(timeline, incomingClipId, frames);
+      const plan = planTransition(timeline, incomingClipId, frames, kind);
       if (!plan.ok) return timeline;
       const { trackIndex, a, b } = outgoingOf(timeline, incomingClipId)!;
       const d = plan.frames;
@@ -62,7 +123,7 @@ export function crossDissolveCommand(incomingClipId: string, frames: number, new
         durationFrames: c.durationFrames + d,
         trimStartFrame: isStill(c) ? c.trimStartFrame : Math.max(0, c.trimStartFrame - d),
       });
-      const newB: Clip = { ...(plan.mode === "incoming-head" ? headShift(b) : b), fadeInFrames: d };
+      const newB: Clip = withEntrance(plan.mode === "incoming-head" ? headShift(b) : b, d, kind);
       const newA: Clip =
         plan.mode === "outgoing-tail"
           ? { ...a, durationFrames: a.durationFrames + d, trimEndFrame: isStill(a) ? a.trimEndFrame : a.trimEndFrame - d }

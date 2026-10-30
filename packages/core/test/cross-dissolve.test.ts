@@ -1,8 +1,8 @@
 import { describe, expect, test } from "vitest";
-import { crossDissolveCommand, defaultTimeline, EditorStore, findClip, opacityAt, planCrossDissolve, type Clip, type Timeline } from "../src/index.js";
+import { crossDissolveCommand, cropAt, defaultTimeline, EditorStore, findClip, opacityAt, planCrossDissolve, planTransition, topLeftAt, transitionCommand, type Clip, type Timeline } from "../src/index.js";
 
 const clip = (id: string, start: number, dur: number, extra: Partial<Clip> = {}): Clip =>
-  ({ id, mediaRef: `m-${id}`, mediaType: "video", sourceClipType: "video", startFrame: start, durationFrames: dur, trimStartFrame: 0, trimEndFrame: 0, speed: 1, volume: 1, fadeInFrames: 0, fadeOutFrames: 0, fadeInInterpolation: "linear", fadeOutInterpolation: "linear", opacity: 1, transform: {}, crop: {}, ...extra }) as Clip;
+  ({ id, mediaRef: `m-${id}`, mediaType: "video", sourceClipType: "video", startFrame: start, durationFrames: dur, trimStartFrame: 0, trimEndFrame: 0, speed: 1, volume: 1, fadeInFrames: 0, fadeOutFrames: 0, fadeInInterpolation: "linear", fadeOutInterpolation: "linear", opacity: 1, transform: { centerX: 0.5, centerY: 0.5, width: 1, height: 1, rotation: 0, flipHorizontal: false, flipVertical: false }, crop: { left: 0, top: 0, right: 0, bottom: 0 }, ...extra }) as Clip;
 
 function tl(a: Partial<Clip>, b: Partial<Clip>, extraTracks: Timeline["tracks"] = []): Timeline {
   return {
@@ -63,5 +63,31 @@ describe("cross-dissolve", () => {
     const store = new EditorStore(base);
     store.dispatch(crossDissolveCommand("b", 24));
     expect(store.getSnapshot().timeline).toBe(base);
+  });
+});
+
+describe("slide and wipe", () => {
+  test("slide from the right: B starts one frame-width right of its place and lands there", () => {
+    const store = new EditorStore(tl({ trimEndFrame: 30 }, {}));
+    store.dispatch(transitionCommand("b", 20, { type: "slide", from: "right" }));
+    const b = store.getSnapshot().timeline.tracks.flatMap((x) => x.clips).find((c) => c.id === "b")!;
+    expect(b.fadeInFrames).toBe(0);
+    expect(topLeftAt(b, b.startFrame)).toEqual({ x: 1, y: 0 });
+    expect(topLeftAt(b, b.startFrame + 20)).toEqual({ x: 0, y: 0 });
+    expect(topLeftAt(b, b.startFrame + 10).x).toBeCloseTo(0.5, 5);
+  });
+
+  test("wipe from the left: B is fully cropped from the right, then opens to its own crop", () => {
+    const store = new EditorStore(tl({ trimEndFrame: 30 }, {}));
+    store.dispatch(transitionCommand("b", 20, { type: "wipe", from: "left" }));
+    const b = store.getSnapshot().timeline.tracks.flatMap((x) => x.clips).find((c) => c.id === "b")!;
+    expect(cropAt(b, b.startFrame)).toEqual({ left: 0, top: 0, right: 1, bottom: 0 });
+    expect(cropAt(b, b.startFrame + 10).right).toBeCloseTo(0.5, 5);
+    expect(cropAt(b, b.startFrame + 20)).toEqual({ left: 0, top: 0, right: 0, bottom: 0 });
+  });
+
+  test("refuses when the clip already has keyframes of that kind", () => {
+    const pos = { keyframes: [{ frame: 0, value: { a: 0, b: 0 }, interpolationOut: "linear" as const }] };
+    expect(planTransition(tl({ trimEndFrame: 30 }, { positionTrack: pos }), "b", 10, { type: "slide", from: "left" })).toMatchObject({ ok: false, message: expect.stringContaining("position keyframes") });
   });
 });
