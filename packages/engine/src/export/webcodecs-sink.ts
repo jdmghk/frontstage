@@ -19,6 +19,31 @@ async function drain(encoder: VideoEncoder | AudioEncoder, limit: number): Promi
   }
 }
 
+/**
+ * Codec candidates (best first) and bitrate for YouTube-quality H.264: High profile at a level that
+ * fits the frame (4.0 up to 1080p30, 4.2 for 1080p60, 5.1/5.2 for 4K), then Main as a fallback.
+ * Bitrates follow YouTube's upload recommendations (1080p ≈ 8–12 Mbps, 4K ≈ 35–68 Mbps).
+ */
+export function youtubeVideoPlan(width: number, height: number, fps: number): { codecs: string[]; bitrate: number } {
+  const pixels = width * height;
+  const high = fps > 30;
+  if (pixels > 1920 * 1088) {
+    return { codecs: ["avc1.640033", "avc1.640034", "avc1.4d0033"], bitrate: high ? 68_000_000 : 45_000_000 };
+  }
+  if (pixels > 1280 * 720) {
+    return { codecs: high ? ["avc1.64002a", "avc1.4d002a"] : ["avc1.640028", "avc1.64002a", "avc1.4d0028"], bitrate: high ? 15_000_000 : 12_000_000 };
+  }
+  return { codecs: ["avc1.64001f", "avc1.4d001f", "avc1.42001f"], bitrate: high ? 7_500_000 : 5_000_000 };
+}
+
+async function firstSupported(codecs: string[], width: number, height: number, bitrate: number, framerate: number): Promise<string | null> {
+  for (const codec of codecs) {
+    const r = await VideoEncoder.isConfigSupported({ codec, width, height, bitrate, framerate }).catch(() => ({ supported: false }));
+    if (r.supported) return codec;
+  }
+  return null;
+}
+
 export class WebCodecsMp4Sink implements ExportSink {
   private opts: ExportOptions | undefined;
   private muxer!: Muxer<ArrayBufferTarget>;
@@ -55,20 +80,24 @@ export class WebCodecsMp4Sink implements ExportSink {
       error: (e) => { this.encoderError = e; },
     });
 
-    const supported = await VideoEncoder.isConfigSupported({
-      codec: "avc1.42001f",
-      width,
-      height,
-      bitrate: this.opts?.bitrate ?? 5_000_000,
-      framerate: fps,
-    });
-    const codec = supported.supported ? "avc1.42001f" : "avc1.42E01F";
+    let codec: string;
+    let bitrate = this.opts?.bitrate ?? 5_000_000;
+    if (this.opts?.quality === "youtube") {
+      const plan = youtubeVideoPlan(width, height, fps);
+      bitrate = this.opts?.bitrate ?? plan.bitrate;
+      const found = await firstSupported(plan.codecs, width, height, bitrate, fps);
+      if (!found) throw new Error(`This browser can't encode ${width}×${height} H.264. Use the desktop app, or a smaller size.`);
+      codec = found;
+    } else {
+      const supported = await VideoEncoder.isConfigSupported({ codec: "avc1.42001f", width, height, bitrate, framerate: fps });
+      codec = supported.supported ? "avc1.42001f" : "avc1.42E01F";
+    }
 
     this.encoder.configure({
       codec,
       width,
       height,
-      bitrate: this.opts?.bitrate ?? 5_000_000,
+      bitrate,
       framerate: fps,
     });
 
@@ -82,7 +111,7 @@ export class WebCodecsMp4Sink implements ExportSink {
         codec: "mp4a.40.2",
         sampleRate: audio.sampleRate,
         numberOfChannels: audio.channels,
-        bitrate: 128_000,
+        bitrate: this.opts?.quality === "youtube" ? 320_000 : 128_000,
       });
     }
   }

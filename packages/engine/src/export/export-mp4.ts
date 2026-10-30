@@ -8,6 +8,8 @@ import { WebCodecsMp4Sink } from "./webcodecs-sink.js";
 
 export interface ExportOptions {
   bitrate?: number;
+  /** "youtube": H.264 High at a level fitting the size, YouTube-class bitrate, 320 kbps AAC. */
+  quality?: "standard" | "youtube";
 }
 
 // A sub-range/downscaled render (M14C T3's generate_audio span-render): omitted fields fall back

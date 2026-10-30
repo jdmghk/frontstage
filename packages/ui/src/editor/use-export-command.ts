@@ -4,7 +4,7 @@ import { cuesFromCaptionClips, exportFcpxml, exportXmeml, formatSrt, formatVtt, 
 import type { MediaByteSource } from "@frontstage/engine";
 import type { ToolContext } from "@frontstage/ai";
 import type { ExportGateway } from "./export-gateway.js";
-import { exportInfo } from "./export-presets.js";
+import { exportInfo, exportPresets, type ExportPreset, type ExportPresetId } from "./export-presets.js";
 import type { RunProjectCommand } from "./Editor.js";
 
 export type ExportKind = "video" | "fcpxml" | "xmeml" | "srt" | "vtt";
@@ -33,12 +33,15 @@ export function useExportCommand(opts: {
 }): {
   exportProject: (kind?: ExportKind, fcpxmlOptions?: FcpxmlExportOptions) => void;
   exportState: ExportState | null;
+  /** Set while the in-app export size picker is open; resolve() with the choice or null. */
+  presetPrompt: { presets: ExportPreset[]; resolve: (id: ExportPresetId | null) => void } | null;
   canExport: boolean;
   canExportXml: boolean;
   canExportCaptions: boolean;
 } {
   const { exportGateway, interopExport, getTimeline, getResolveTimeline, getMediaEntries, media, suggestedName, runProjectCommand } = opts;
   const [exportState, setExportState] = useState<ExportState | null>(null);
+  const [presetPrompt, setPresetPrompt] = useState<{ presets: ExportPreset[]; resolve: (id: ExportPresetId | null) => void } | null>(null);
   // Sync re-entrancy guard: state update is async, so we need a ref too.
   const runningRef = useRef(false);
 
@@ -47,7 +50,16 @@ export function useExportCommand(opts: {
     runningRef.current = true;
     runProjectCommand(async () => {
       try {
-        const t = await exportGateway.pickTarget(suggestedName(), exportInfo(getTimeline(), getMediaEntries?.() ?? []));
+        const info = exportInfo(getTimeline(), getMediaEntries?.() ?? []);
+        let presetId: ExportPresetId | undefined;
+        if (exportGateway.choosesPresetInApp) {
+          const choice = await new Promise<ExportPresetId | null>((resolve) =>
+            setPresetPrompt({ presets: exportPresets(info), resolve: (id) => { setPresetPrompt(null); resolve(id); } }),
+          );
+          if (!choice) return;
+          presetId = choice;
+        }
+        const t = presetId ? await exportGateway.pickTarget(suggestedName(), info, presetId) : await exportGateway.pickTarget(suggestedName(), info);
         if (!t) return;
         setExportState({ label: t.label, done: 0, total: 1 });
         try {
@@ -125,5 +137,5 @@ export function useExportCommand(opts: {
   const currentTimeline = getTimeline();
   const canExportCaptions = !!interopExport && cuesFromCaptionClips(currentTimeline, currentTimeline.fps).length > 0;
 
-  return { exportProject, exportState, canExport: !!exportGateway, canExportXml: !!interopExport, canExportCaptions };
+  return { exportProject, exportState, presetPrompt, canExport: !!exportGateway, canExportXml: !!interopExport, canExportCaptions };
 }

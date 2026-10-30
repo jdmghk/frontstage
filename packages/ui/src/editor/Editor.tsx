@@ -54,6 +54,7 @@ import { useStore } from "../store/use-store.js";
 import { useExportCommand } from "./use-export-command.js";
 import type { ExportKind } from "./use-export-command.js";
 import { ExportProgress } from "./ExportProgress.js";
+import { ExportPresetDialog } from "./ExportPresetDialog.js";
 import type { ExportGateway } from "./export-gateway.js";
 import { handleEditorKeydown } from "./editor-shortcuts.js";
 
@@ -276,7 +277,7 @@ export function Editor({ store, media, library, session, nativeFileMenu, exportG
     });
   }
 
-  const { exportProject, exportState, canExport, canExportXml, canExportCaptions } = useExportCommand({
+  const { exportProject, exportState, presetPrompt, canExport, canExportXml, canExportCaptions } = useExportCommand({
     exportGateway,
     interopExport,
     getTimeline: () => store.getSnapshot().timeline,
@@ -619,6 +620,7 @@ export function Editor({ store, media, library, session, nativeFileMenu, exportG
       />
 
       <ExportProgress state={exportState} />
+      {presetPrompt && <ExportPresetDialog presets={presetPrompt.presets} onChoose={presetPrompt.resolve} />}
 
       {generateVisible && agent?.generation && (
         <GenerationPanel

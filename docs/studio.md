@@ -34,7 +34,8 @@ rail, no separate dashboard.
 | Claude: characters from the story | **Implemented** | Story → **Suggest characters**; details you wrote are kept |
 | Claude: per-scene script, shot list, dialogue/voiceover, continuity | **Implemented** | Scene card buttons; each acts on that scene only. **Break into shots** keeps shots that have takes |
 | Claude: per-shot generation prompt | **Implemented** | Shot card → **Write prompt** |
-| Claude in the web editor | Not yet | Needs a proxy/relay route; the desktop app holds the key today |
+| Claude in the web editor | **Implemented** | Self-host proxy: set `ANTHROPIC_API_KEY`. Cloud relay: each user adds their own Anthropic key in Settings (kept in their browser). Choreography frames are sampled in the browser |
+| Voice and Veo in the web editor | **Implemented** | Through the existing fal proxy/relay route and key |
 | Generate, play, regenerate one line | **Implemented** (desktop + web with a fal key) | Voice tab → line → **Generate** / **Regenerate**; every take is kept, approve one. fal-hosted Chatterbox Multilingual, $0.025 per 1,000 characters, 23 languages, 300 characters per line |
 | Place dialogue on the timeline | **Implemented** | **Place on timeline** puts the approved take on an audio track under its shot (or the scene's first shot), after the previous line; **Replace on timeline** swaps just that clip |
 | Export approved dialogue | **Implemented** (desktop) | Voice tab → **Export approved…** writes one audio file per line + `lines.txt` |
@@ -43,7 +44,7 @@ rail, no separate dashboard.
 | Fight choreography: edit, approve → scene shots | **Implemented** | Edit every field; **Approve → add shots** appends them to the chosen scene as draft shots |
 | Motion from the reference video | **Implemented** (desktop, Morphic) | Approved choreography shots keep the reference as a *motion reference*; **Generate in Morphic** sends it as `reference_video_asset_ids` (Morphic reference-to-video). It guides movement; it isn't exact motion transfer, and models that don't take reference video are refused by Morphic with the reason |
 | YouTube export presets (1080p, 4K, 16:9) | **Implemented** (Phase 6, desktop) | File → Export Video asks *Timeline size / YouTube 1080p / YouTube 4K*; YouTube presets encode H.264 High CRF 18 (preset slow), yuv420p, AAC 320 kbps 48 kHz, faststart. Disabled with a reason on non-16:9 timelines; warns when sources are smaller than the output |
-| Export presets in the web editor | Not yet | The web encoder is fixed H.264 Baseline at 5 Mbps; 4K isn't possible there |
+| Export presets in the web editor | **Implemented** | In-app *Export size* picker; YouTube presets use H.264 High at a fitting level (12 Mbps 1080p, 45 Mbps 4K) + 320 kbps AAC. 4K depends on the browser's encoder; if it can't, the export says so. Checked: a real browser export came out 1920×1080 H.264 High |
 | Per-track volume | **Implemented** | Audio track header dB field (-60…+12), on top of each clip's volume; applies to preview and export; undoable |
 | Cross-dissolve | **Implemented** | Inspector → Transition → **Cross-dissolve from previous clip**: the clip moves to a track above and fades in over the previous one; nothing else moves. Needs spare footage on one side (it says how much) |
 | Slide and wipe transitions | **Implemented** | Inspector → Transition → *Slide in* / *Wipe* + direction; built from position / crop keyframes on the incoming clip, same no-ripple rules as the dissolve |
