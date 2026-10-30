@@ -131,3 +131,19 @@ export {
 } from "./generation/morphic-gateway.js";
 export type { MorphicStudioDeps, MorphicStartResult } from "./generation/morphic-studio.js";
 export { MorphicStudio, shotPrompt, characterDesignPrompt, characterBrief } from "./generation/morphic-studio.js";
+export type { ClaudeGateway, ClaudeStudioRequest, ClaudeStudioResult, ClaudeStudioErrorKind, StudioEffort, WriterTask } from "./studio/writer.js";
+export {
+  STUDIO_MODELS,
+  DEFAULT_STUDIO_MODEL,
+  productionContext,
+  outlineTask,
+  sceneScriptTask,
+  charactersTask,
+  shotListTask,
+  shotPromptTask,
+  dialogueTask,
+  continuityTask,
+  runWriterTask,
+} from "./studio/writer.js";
+export type { FlowPack } from "./studio/flow-handoff.js";
+export { buildFlowPack, FLOW_MAX_REFERENCES } from "./studio/flow-handoff.js";

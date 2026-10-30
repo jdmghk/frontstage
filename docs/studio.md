@@ -1,8 +1,8 @@
 # Production studio
 
 Frontstage extensions for producing AI-generated YouTube videos: scenes and shots, reusable
-characters, Morphic generation (desktop), and (in later phases) a Google Flow handoff, Claude scriptwriting, voice and
-choreography. Everything lives inside the existing editor — two new tabs on the media panel's left
+characters, Morphic generation, Claude writing and a Google Flow hand-off (desktop), and (in later
+phases) voice and choreography. Everything lives inside the existing editor — two new tabs on the media panel's left
 rail, no separate dashboard.
 
 ## Feature status
@@ -25,8 +25,14 @@ rail, no separate dashboard.
 | Generate a character design in Morphic | **Implemented** | Character card → **Generate design in Morphic**; mark it **Design** to approve |
 | Morphic in the web editor | Not supported | No loopback sign-in on the web; use **Import take…** with source *Morphic (manual)* |
 | Morphic trained characters (`character_id`) | Not yet | Listed by Morphic's server, not wired into the UI |
-| Google Flow handoff pack | Not yet | Phase 4. There is no public Flow API, so this will stay a manual handoff |
-| Claude scriptwriting | Not yet | Phase 4 |
+| Google Flow hand-off pack | **Implemented** (Phase 4, desktop) | Shot card → **Prepare for Flow…** writes `prompt.txt`, `shot.md` and up to 3 reference images to a folder. There is no public Flow API, so the clip comes back through **Import take…** |
+| Copy a shot's full prompt | **Implemented** | Shot card → **Copy prompt** (prompt + camera, framing, cast, continuity) |
+| Google Flow direct connection | Not supported | No public API exists |
+| Claude: outline, logline, scenes | **Implemented** (Phase 4, desktop) | Production → Story → **Write outline**; scenes are only created when there are none |
+| Claude: characters from the story | **Implemented** | Story → **Suggest characters**; details you wrote are kept |
+| Claude: per-scene script, shot list, dialogue/voiceover, continuity | **Implemented** | Scene card buttons; each acts on that scene only. **Break into shots** keeps shots that have takes |
+| Claude: per-shot generation prompt | **Implemented** | Shot card → **Write prompt** |
+| Claude in the web editor | Not yet | Needs a proxy/relay route; the desktop app holds the key today |
 | Voice generation | Not yet | Phase 5 (fal-hosted Chatterbox) |
 | Fight choreography | Not yet | Phase 5 |
 | YouTube export presets | Not yet | Phase 6 |
@@ -34,8 +40,8 @@ rail, no separate dashboard.
 ## How it's stored
 
 A project folder gains one file, `production.json`, next to `project.json`, `media.json` and
-`generation-log.json`. Projects that never use the Production tab don't get one, and older projects
-open unchanged. The file holds scenes (with their shots and takes) and the project's characters;
+`generation-log.json`, written on every save from the desktop or web editor. Older projects without
+it open unchanged, with an empty production. The file holds scenes (with their shots and takes) and the project's characters;
 takes and references point at media-library ids, so the media itself stays in `media/`.
 
 Unlike `media.json`, an unreadable `production.json` stops the project from opening with an error
@@ -46,6 +52,33 @@ library isn't either). "Place" and "Replace" *are* timeline edits and undo norma
 
 Deleting an asset from the media library removes it from any shot's takes and any character's
 references; if it was a shot's approved take, the shot drops back to `generated`.
+
+## Claude writing (desktop)
+
+1. **Settings → Agent → Anthropic (Claude writing)**: paste an Anthropic API key. It's encrypted with
+   the OS keychain in the main process and never reaches the renderer. Pick the writing model:
+   Claude Opus 5.5 (default) or Claude Sonnet 5.5.
+2. **Production → Story**: write the idea, then **Write outline** (logline, outline and, on an empty
+   production, a first list of scenes) and **Suggest characters**.
+3. On a scene: **Write script**, **Break into shots**, **Write dialogue**, **Continuity notes**. On a
+   shot: **Write prompt**.
+
+Everything Claude writes arrives as a **draft** you edit and approve; nothing is regenerated beyond the
+scene or shot you clicked. Requests use structured outputs (a JSON schema per task) and are checked
+again on arrival; a reply in the wrong shape is rejected with a message, not half-applied. Server-side
+refusal fallbacks are on (`fallbacks: "default"`): if Claude's safety classifiers decline a request,
+Anthropic re-runs it on its recommended fallback model; if the whole chain declines, you see the reason.
+Each action costs Anthropic API usage.
+
+Code: `packages/ai/src/studio/writer.ts` (tasks, schemas, apply rules),
+`apps/desktop/src/main/claude-studio.mjs` (Messages API call), `packages/ui/src/production/writer-ui.tsx`.
+
+## Google Flow hand-off
+
+Google Flow has no public API. **Prepare for Flow…** on a shot saves a folder named like
+`02-03 Rooftop duel - Spinning kick` with `prompt.txt`, `shot.md` (camera, framing, cast, steps) and
+`ref-1…ref-3` (the cast's approved designs first: Flow takes at most three ingredients). Generate in
+Flow, download the clip, then on the shot choose **Google Flow (manual)** and **Import take…**.
 
 ## Using it
 
@@ -72,6 +105,9 @@ character in every clip.
   `src/project/project-session.test.ts`
 - UI: `packages/ui/test/production-store.test.ts`, `character-library.test.ts`, `production-tab.test.tsx`
 - Desktop fs: `apps/desktop/test/characters-fs.test.ts`
+- Claude + Flow: `packages/ai/test/studio-writer.test.ts` (schemas, apply rules, refusal, wrong-shape
+  replies, Flow pack), `apps/desktop/test/claude-studio.test.ts` (request checks, fallbacks, error
+  mapping), Claude/Flow cases in `packages/ui/test/production-tab.test.tsx`
 - Morphic: `packages/ai/test/morphic-gateway.test.ts` (fake Morphic: success, tool error, expired
   sign-in, no-asset result, references, project choice), `apps/desktop/test/morphic-client.test.ts`
   (upload sequence, allowlist, loopback callback, sign-in gating). The live check is manual; see

@@ -1,7 +1,7 @@
 import { buildChatBody, parseOpenRouterStream, buildImageBody, parseImageResponse } from "@frontstage/ai";
 import type { AiGateway, ChatRequest, StreamEvent, ImageRequest, ImageResult } from "@frontstage/ai";
 
-export type AiKeyProvider = "openrouter" | "fal";
+export type AiKeyProvider = "openrouter" | "fal" | "anthropic";
 
 interface DesktopAIBridge {
   setKey(key: string, provider?: AiKeyProvider): Promise<void>;

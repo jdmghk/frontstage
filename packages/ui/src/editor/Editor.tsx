@@ -4,7 +4,8 @@ import type { ProjectSession } from "@frontstage/core";
 import type { AgentSession, ChatSessionStore, ModelEntry, ToolContext } from "@frontstage/ai";
 import type { MentionItem } from "../agent/MentionInput.js";
 import { SettingsPanel } from "../agent/SettingsPanel.js";
-import type { KeyConfig, FalKeyConfig, McpSettings, RelayConfig } from "../agent/SettingsPanel.js";
+import type { KeyConfig, FalKeyConfig, McpSettings, RelayConfig, ClaudeSettings } from "../agent/SettingsPanel.js";
+import type { FlowExport, StudioWriter } from "../production/writer-ui.js";
 import type { SkillsPaneProps } from "../skills/SkillsPane.js";
 import { ProjectActivityButton } from "./ProjectActivityView.js";
 import {
@@ -115,6 +116,7 @@ export interface EditorProps {
       mcp?: McpSettings;
       skills?: SkillsPaneProps;
       relay?: RelayConfig;
+      claude?: ClaudeSettings;
     };
     // Relay mode (M18C T3) — gates the GenerationPanel/AgentPanel composer when signed out.
     relayGate?: RelayGate;
@@ -126,6 +128,9 @@ export interface EditorProps {
   characterLibrary?: CharacterLibrary;
   // Morphic generation for shots and character designs (desktop). Omitted -> those actions are hidden.
   morphic?: StudioMorphic;
+  // Claude writing and the Google Flow hand-off for the Production tab. Omitted -> hidden.
+  writer?: StudioWriter;
+  flowExport?: FlowExport;
 }
 
 interface DiscardDialogState {
@@ -134,7 +139,7 @@ interface DiscardDialogState {
 
 export type RunProjectCommand = (fn: () => Promise<unknown>) => void;
 
-export function Editor({ store, media, library, session, nativeFileMenu, exportGateway, interopExport, engineRef, onReady, agent, getGenerationLog, indexing, relayAuth, waveformCache: waveformCacheProp, production, characterLibrary, morphic }: EditorProps) {
+export function Editor({ store, media, library, session, nativeFileMenu, exportGateway, interopExport, engineRef, onReady, agent, getGenerationLog, indexing, relayAuth, waveformCache: waveformCacheProp, production, characterLibrary, morphic, writer, flowExport }: EditorProps) {
   const dragController = useMemo(() => new MediaDragController(), []);
   const ownedWaveformCache = useMemo(() => new WaveformCache(), []);
   const waveformCache = waveformCacheProp ?? ownedWaveformCache;
@@ -568,6 +573,8 @@ export function Editor({ store, media, library, session, nativeFileMenu, exportG
             production={production}
             characterLibrary={characterLibrary}
             morphic={morphic}
+            writer={writer}
+            flowExport={flowExport}
             onItemPointerDown={(entry, e) => {
               e.preventDefault();
               dragController.start(entry, e.clientX, e.clientY, e.metaKey || e.ctrlKey);
@@ -627,6 +634,7 @@ export function Editor({ store, media, library, session, nativeFileMenu, exportG
           mcp={agent.settings.mcp}
           skills={agent.settings.skills}
           relay={agent.settings.relay}
+          claude={agent.settings.claude}
           morphic={morphic?.account}
         />
       )}

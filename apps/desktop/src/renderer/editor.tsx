@@ -1,4 +1,4 @@
-import { StrictMode, useState, useEffect } from "react";
+import { StrictMode, useState, useEffect, useMemo, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { EditorStore, ProjectSession, defaultTimeline, SAMPLER_VERSION } from "@frontstage/core";
 import type { MediaManifestEntry } from "@frontstage/core";
@@ -33,8 +33,9 @@ import { DesktopExportGateway } from "./desktop-export-gateway.js";
 import { DesktopAiGateway } from "./desktop-ai-gateway.js";
 import { DesktopGenGateway } from "./desktop-gen-gateway.js";
 import { DesktopMorphicBridge } from "./desktop-morphic.js";
-import { MorphicGateway, MorphicStudio, RoutingGenGateway } from "@frontstage/ai";
-import type { StudioMorphic } from "@frontstage/ui";
+import { desktopClaudeGateway, desktopFlowExport } from "./desktop-studio.js";
+import { MorphicGateway, MorphicStudio, RoutingGenGateway, STUDIO_MODELS, DEFAULT_STUDIO_MODEL } from "@frontstage/ai";
+import type { StudioMorphic, StudioWriter } from "@frontstage/ui";
 import { makeDesktopAudioExtractor } from "./desktop-audio-extract.js";
 import { createDesktopMediaImport } from "./desktop-media-import.js";
 import { createDesktopLut } from "./desktop-lut.js";
@@ -431,12 +432,20 @@ function FrontstageDesktopApp() {
   const [imageModelId, setImageModelId] = useState(() => localStorage.getItem("frontstage.image.model") ?? defaultImageModel());
   const [hasKey, setHasKey] = useState(false);
   const [falHasKey, setFalHasKey] = useState(false);
+  const [anthropicHasKey, setAnthropicHasKey] = useState(false);
+  const [studioModel, setStudioModel] = useState(() => localStorage.getItem("frontstage.studio.model") ?? DEFAULT_STUDIO_MODEL);
   const [confirmThreshold, setConfirmThreshold] = useState(() => readConfirmThreshold());
 
   useEffect(() => {
     window.desktopAI?.hasKey().then(setHasKey).catch(() => {});
     window.desktopAI?.hasKey("fal").then(setFalHasKey).catch(() => {});
+    window.desktopAI?.hasKey("anthropic").then(setAnthropicHasKey).catch(() => {});
   }, []);
+
+  // Read the model at call time so a Settings change applies to the next writing action.
+  const studioModelRef = useRef(studioModel);
+  studioModelRef.current = studioModel;
+  const writer = useMemo<StudioWriter>(() => ({ gateway: desktopClaudeGateway, model: () => studioModelRef.current }), []);
 
   function onAgentModelChange(id: string) {
     setAgentModelId(id);
@@ -485,6 +494,26 @@ function FrontstageDesktopApp() {
     },
   };
 
+  const claudeSettings = {
+    keyConfig: {
+      hasKey: anthropicHasKey,
+      onSetKey: async (k: string) => {
+        await window.desktopAI?.setKey(k, "anthropic");
+        setAnthropicHasKey(true);
+      },
+      onClearKey: async () => {
+        await window.desktopAI?.clearKey("anthropic");
+        setAnthropicHasKey(false);
+      },
+    },
+    model: studioModel,
+    models: STUDIO_MODELS,
+    onModelChange: (id: string) => {
+      setStudioModel(id);
+      localStorage.setItem("frontstage.studio.model", id);
+    },
+  };
+
   return (
     <Editor
       store={store}
@@ -501,6 +530,8 @@ function FrontstageDesktopApp() {
       production={production}
       characterLibrary={characterLibrary}
       morphic={morphic}
+      writer={anthropicHasKey ? writer : undefined}
+      flowExport={desktopFlowExport}
       agent={{
         session: agentSession,
         model: agentModelId,
@@ -527,6 +558,7 @@ function FrontstageDesktopApp() {
             regenerateToken: () => window.desktopMcp!.regenerateToken(),
           } : undefined,
           skills: { store: skillStore, catalog: skillCatalog },
+          claude: claudeSettings,
         },
       }}
       onReady={(cmds) => {

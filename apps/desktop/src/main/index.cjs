@@ -868,6 +868,10 @@ const KEY_FILES = {
     enc: path.join(app.getPath("userData"), "fal-key.bin"),
     plain: path.join(app.getPath("userData"), "fal-key-plain.txt"),
   },
+  anthropic: {
+    enc: path.join(app.getPath("userData"), "anthropic-key.bin"),
+    plain: path.join(app.getPath("userData"), "anthropic-key-plain.txt"),
+  },
 };
 
 function keyFiles(provider) {
@@ -1740,4 +1744,36 @@ ipcMain.handle("morphic:download", async (_e, { url }) => {
   } catch (err) {
     return morphicError(err);
   }
+});
+
+// ── Claude IPC (Studio, Phase 4) ───────────────────────────────────────────
+// Writing actions (outline, script, shots, prompts, dialogue, continuity) and choreography analysis.
+// The Anthropic key stays in main (safeStorage, same store as the other provider keys).
+
+let _claudeStudioMod = null;
+ipcMain.handle("claude:run", async (_e, req) => {
+  if (!_claudeStudioMod) _claudeStudioMod = await import("./claude-studio.mjs");
+  return _claudeStudioMod.runClaudeStudio(loadKey("anthropic"), req);
+});
+
+// Flow hand-off: writes the pack's text files and reference images into <chosen dir>/<folderName>.
+ipcMain.handle("studio:writeFlowPack", async (e, { folderName, files, images }) => {
+  const win = BrowserWindow.fromWebContents(e.sender);
+  const pick = await dialog.showOpenDialog(win, { title: "Choose where to save the Google Flow hand-off", properties: ["openDirectory", "createDirectory"] });
+  if (pick.canceled || !pick.filePaths[0]) return { canceled: true };
+  // One path segment: no separators, reserved or control characters, never "." or "..".
+  const safeName = (n) => typeof n === "string" && /^[^\\/:*?"<>|\x00-\x1f]{1,120}$/.test(n) && n.trim() !== "" && n !== "." && n !== "..";
+  if (!safeName(folderName)) return { error: "invalid folder name" };
+  const dir = path.join(pick.filePaths[0], folderName);
+  fs.mkdirSync(dir, { recursive: true });
+  for (const f of files ?? []) {
+    if (!safeName(f.name)) return { error: `invalid file name: ${f.name}` };
+    fs.writeFileSync(path.join(dir, f.name), String(f.text), "utf8");
+  }
+  for (const img of images ?? []) {
+    if (!safeName(img.name)) return { error: `invalid file name: ${img.name}` };
+    fs.writeFileSync(path.join(dir, img.name), Buffer.from(img.bytes));
+  }
+  shell.showItemInFolder(path.join(dir, "prompt.txt"));
+  return { path: dir };
 });

@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import type { ModelEntry } from "@frontstage/ai";
 import { theme } from "../theme/theme.js";
-import { Button, IconButton, TextInput, Checkbox, Icon, type IconName } from "../primitives/index.js";
+import { Button, IconButton, TextInput, Checkbox, Icon, Select, type IconName } from "../primitives/index.js";
 import { ModelPicker } from "./ModelPicker.js";
 import { DEFAULT_CONFIRM_THRESHOLD } from "./generation-settings.js";
 import { SkillsPane, type SkillsPaneProps } from "../skills/SkillsPane.js";
@@ -53,6 +53,13 @@ interface KeychainLike {
   onClearKey: () => void | Promise<void>;
 }
 
+export interface ClaudeSettings {
+  keyConfig: KeychainLike;
+  model: string;
+  models: readonly { id: string; label: string }[];
+  onModelChange: (id: string) => void;
+}
+
 export interface McpSettings {
   getStatus: () => Promise<{ enabled: boolean; running: boolean; url: string; token: string }>;
   setEnabled: (on: boolean) => Promise<{ enabled: boolean }>;
@@ -87,6 +94,8 @@ export interface SettingsPanelProps {
   mcp?: McpSettings;
   skills?: SkillsPaneProps;
   relay?: RelayConfig;
+  // Claude writing for the Production tab (desktop). Omitted -> section hidden.
+  claude?: ClaudeSettings;
   // Desktop only: Morphic sign-in for the Production/Characters tabs. Omitted -> section hidden.
   morphic?: MorphicAccount;
 }
@@ -404,6 +413,7 @@ export function SettingsPanel({
   mcp,
   skills,
   relay,
+  claude,
   morphic,
 }: SettingsPanelProps) {
   const [tab, setTab] = useState<SettingsTab>("agent");
@@ -512,6 +522,21 @@ export function SettingsPanel({
                 <PaneSection header="OpenRouter">
                   {keyConfig.kind === "keychain" ? <KeychainConfig cfg={keyConfig} /> : <ProxyConfig cfg={keyConfig} />}
                 </PaneSection>
+              )}
+              {claude && (
+                <section data-testid="settings-anthropic" style={{ display: "flex", flexDirection: "column", gap: theme.spacing.sm }}>
+                  <span style={sectionHeaderStyle}>Anthropic (Claude writing)</span>
+                  <KeychainConfig cfg={claude.keyConfig} testidPrefix="settings-anthropic-key" placeholder="Paste Anthropic API key…" />
+                  <label style={{ display: "flex", alignItems: "center", gap: theme.spacing.sm, fontSize: theme.fontSize.sm, color: theme.text.secondary }}>
+                    Writing model
+                    <Select
+                      value={claude.model}
+                      options={claude.models.map((m) => ({ value: m.id, label: m.label }))}
+                      onChange={claude.onModelChange}
+                      testid="settings-anthropic-model"
+                    />
+                  </label>
+                </section>
               )}
               <ModelPicker
                 testid="settings-agent-model"

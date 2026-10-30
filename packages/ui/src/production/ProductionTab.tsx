@@ -26,6 +26,8 @@ import { Button, Checkbox, Icon, IconButton, Select, TextInput } from "../primit
 import { ensureFolderPath, numbered, type ProductionStore } from "./production-store.js";
 import { ApprovalToggle, Field, FieldLabel, StatusChip, TextArea, Thumb, cardStyle, rowStyle, scrollColumnStyle } from "./fields.js";
 import type { StudioMorphic } from "./morphic.js";
+import { buildFlowPack, continuityTask, dialogueTask, sceneScriptTask, shotListTask, shotPromptTask, shotPrompt } from "@frontstage/ai";
+import { ActionNote, DialogueEditor, StoryCard, WriteButton, useWriterAction, type FlowExport, type StudioWriter } from "./writer-ui.js";
 
 export interface ProductionLibrary {
   getSnapshot(): { entries: MediaManifestEntry[]; folders: MediaFolder[] };
@@ -34,6 +36,8 @@ export interface ProductionLibrary {
   entry(id: string): MediaManifestEntry | undefined;
   importFiles(files: File[] | FileList, folderId?: string): Promise<MediaManifestEntry[]>;
   createFolder(name: string, parentFolderId?: string): MediaFolder;
+  /** Needed for the Google Flow hand-off's reference images. */
+  readEntryBytes?(id: string): Promise<Uint8Array>;
 }
 
 export interface ProductionTabProps {
@@ -41,6 +45,8 @@ export interface ProductionTabProps {
   library: ProductionLibrary;
   store?: EditorStore;
   morphic?: StudioMorphic;
+  writer?: StudioWriter;
+  flowExport?: FlowExport;
 }
 
 const noopSubscribe = () => () => {};
@@ -58,7 +64,7 @@ const MANUAL_STATUSES: { value: ShotStatus; label: string }[] = [
   { value: "needs-regen", label: "Needs regeneration" },
 ];
 
-export function ProductionTab({ production, library, store, morphic }: ProductionTabProps) {
+export function ProductionTab({ production, library, store, morphic, writer, flowExport }: ProductionTabProps) {
   const p = useSyncExternalStore(production.subscribe.bind(production), () => production.getSnapshot());
   useSyncExternalStore(library.subscribe.bind(library), () => library.getSnapshot().entries);
   // Re-render on timeline edits so "Place" flips to "Replace" (and back if the clip is deleted).
@@ -98,6 +104,7 @@ export function ProductionTab({ production, library, store, morphic }: Productio
         </span>
       </div>
       <div style={scrollColumnStyle}>
+        <StoryCard p={p} production={production} writer={writer} />
         {p.scenes.length === 0 && (
           <div style={{ fontSize: theme.fontSize.sm, color: theme.text.tertiary }} data-testid="production-empty">
             Break your video into scenes and shots. Each shot keeps its prompt, references and every take, so
@@ -118,6 +125,8 @@ export function ProductionTab({ production, library, store, morphic }: Productio
             library={library}
             store={store}
             morphic={morphic}
+            writer={writer}
+            flowExport={flowExport}
           />
         ))}
       </div>
@@ -137,11 +146,21 @@ interface SceneCardProps {
   library: ProductionLibrary;
   store?: EditorStore;
   morphic?: StudioMorphic;
+  writer?: StudioWriter;
+  flowExport?: FlowExport;
 }
 
-function SceneCard({ p, scene, index, open, onToggle, expanded, onToggleShot, production, library, store, morphic }: SceneCardProps) {
+function SceneCard({ p, scene, index, open, onToggle, expanded, onToggleShot, production, library, store, morphic, writer, flowExport }: SceneCardProps) {
   const set = (patch: Partial<Omit<Scene, "id" | "shots">>) => production.update((cur) => updateScene(cur, scene.id, patch));
   const tid = `scene-${index}`;
+  const { busy, message, run } = useWriterAction(production, writer);
+  // Re-read the scene at click time so a task never works from a stale render.
+  const latest = (cur: Production) => cur.scenes.find((s) => s.id === scene.id) ?? scene;
+  const handleShotList = () => {
+    const drafts = scene.shots.filter((s) => s.takes.length === 0);
+    if (drafts.length > 0 && !globalThis.confirm?.(`Replace ${drafts.length} shot(s) that have no takes yet? Shots with takes are kept.`)) return;
+    void run("Break into shots", (cur, model) => shotListTask(cur, latest(cur), model));
+  };
   return (
     <div style={cardStyle} data-testid={tid}>
       <div style={rowStyle}>
@@ -186,6 +205,16 @@ function SceneCard({ p, scene, index, open, onToggle, expanded, onToggleShot, pr
               ))}
             </div>
           )}
+          <DialogueEditor p={p} scene={scene} production={production} tid={tid} />
+          {writer && (
+            <div style={{ ...rowStyle, flexWrap: "wrap" }}>
+              <WriteButton label="Write script" busy={busy} testid={`${tid}-write-script`} onClick={() => void run("Write script", (cur, model) => sceneScriptTask(cur, latest(cur), model))} />
+              <WriteButton label="Break into shots" busy={busy} testid={`${tid}-write-shots`} onClick={handleShotList} title="Writes this scene's shot list; shots that already have takes are kept" />
+              <WriteButton label="Write dialogue" busy={busy} testid={`${tid}-write-dialogue`} onClick={() => void run("Write dialogue", (cur, model) => dialogueTask(cur, latest(cur), model))} />
+              <WriteButton label="Continuity notes" busy={busy} testid={`${tid}-write-continuity`} onClick={() => void run("Continuity notes", (cur, model) => continuityTask(cur, latest(cur), model))} />
+            </div>
+          )}
+          <ActionNote message={message} testid={`${tid}-write-message`} />
           {scene.shots.map((shot, shi) => (
             <ShotCard
               key={shot.id}
@@ -200,6 +229,8 @@ function SceneCard({ p, scene, index, open, onToggle, expanded, onToggleShot, pr
               library={library}
               store={store}
               morphic={morphic}
+              writer={writer}
+              flowExport={flowExport}
             />
           ))}
           <div>
@@ -231,9 +262,12 @@ interface ShotCardProps {
   library: ProductionLibrary;
   store?: EditorStore;
   morphic?: StudioMorphic;
+  writer?: StudioWriter;
+  flowExport?: FlowExport;
 }
 
-function ShotCard({ p, scene, sceneIndex, shot, index, open, onToggle, production, library, store, morphic }: ShotCardProps) {
+function ShotCard({ p, scene, sceneIndex, shot, index, open, onToggle, production, library, store, morphic, writer, flowExport }: ShotCardProps) {
+  const writing = useWriterAction(production, writer);
   const fileInput = useRef<HTMLInputElement>(null);
   const [source, setSource] = useState<ShotProvider>("import");
   const [message, setMessage] = useState<{ text: string; error: boolean } | null>(null);
@@ -282,6 +316,46 @@ function ShotCard({ p, scene, sceneIndex, shot, index, open, onToggle, productio
     } finally {
       setBusy(false);
       if (fileInput.current) fileInput.current.value = "";
+    }
+  };
+
+  const handleCopyPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(shotPrompt(production.getSnapshot(), scene, shot));
+      setMessage({ text: "Prompt copied (with camera, cast and continuity).", error: false });
+    } catch {
+      setMessage({ text: "Couldn't copy to the clipboard.", error: true });
+    }
+  };
+
+  // Google Flow has no API: write prompt.txt, shot.md and up to three reference images to a folder.
+  const handleFlow = async () => {
+    if (!flowExport) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const entries = library.getSnapshot().entries;
+      const imageIds = new Set(entries.filter((e) => e.type === "image" && !e.generationStatus).map((e) => e.id));
+      const pack = buildFlowPack(production.getSnapshot(), scene, shot, imageIds);
+      const images: { name: string; bytes: Uint8Array }[] = [];
+      for (const [i, id] of pack.referenceIds.entries()) {
+        if (!library.readEntryBytes) break;
+        const entry = entries.find((e) => e.id === id)!;
+        const path = entry.source.kind === "project" ? entry.source.relativePath : entry.source.absolutePath;
+        const ext = (path.split(".").pop() ?? "png").toLowerCase().slice(0, 5);
+        images.push({ name: `ref-${i + 1}.${ext}`, bytes: await library.readEntryBytes(id) });
+      }
+      const r = await flowExport(pack, images);
+      if ("error" in r) setMessage({ text: `Couldn't save the hand-off: ${r.error}`, error: true });
+      else if ("path" in r) {
+        set({ provider: "flow-manual" });
+        setSource("flow-manual");
+        setMessage({ text: `Saved to ${r.path}. Generate in Google Flow, then Import take… here.`, error: false });
+      }
+    } catch (e) {
+      setMessage({ text: `Couldn't prepare the hand-off: ${e instanceof Error ? e.message : String(e)}`, error: true });
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -364,6 +438,31 @@ function ShotCard({ p, scene, sceneIndex, shot, index, open, onToggle, productio
             <ApprovalToggle state={shot.promptState} onChange={(promptState) => set({ promptState })} testid={`${tid}-prompt-approval`} />
           </div>
           <TextArea value={shot.prompt} onChange={(prompt) => set({ prompt, promptState: "draft" })} rows={3} testid={`${tid}-prompt`} />
+          <div style={{ ...rowStyle, flexWrap: "wrap" }}>
+            {writer && (
+              <WriteButton
+                label="Write prompt"
+                busy={writing.busy}
+                testid={`${tid}-write-prompt`}
+                title="Writes a video prompt from the action, camera, framing and the cast's looks"
+                onClick={() =>
+                  void writing.run("Write prompt", (cur, model) => {
+                    const sc = cur.scenes.find((s) => s.id === scene.id) ?? scene;
+                    return shotPromptTask(cur, sc, sc.shots.find((s) => s.id === shot.id) ?? shot, model);
+                  })
+                }
+              />
+            )}
+            <Button size="small" testid={`${tid}-copy-prompt`} onClick={() => void handleCopyPrompt()} title="Copies the prompt plus camera, framing, cast and continuity">
+              Copy prompt
+            </Button>
+            {flowExport && (
+              <Button size="small" disabled={busy} testid={`${tid}-flow`} onClick={() => void handleFlow()} title="Saves prompt.txt, a shot sheet and up to 3 reference images to a folder for Google Flow">
+                Prepare for Flow…
+              </Button>
+            )}
+          </div>
+          <ActionNote message={writing.message} testid={`${tid}-write-message`} />
           <div style={rowStyle}>
             <FieldLabel>Status</FieldLabel>
             <Select

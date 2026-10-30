@@ -39,6 +39,15 @@ export const ShotSchema = z.object({
   notes: z.string().default(""),
 });
 
+/** One spoken line. speaker = a character id, or "narrator" for voiceover. */
+export const DialogueLineSchema = z.object({
+  id: z.string().default(uuid),
+  speaker: z.string().default("narrator"),
+  text: z.string().default(""),
+  /** Delivery note for the voice (e.g. "whispered, out of breath"). */
+  direction: z.string().default(""),
+});
+
 export const SceneSchema = z.object({
   id: z.string().default(uuid),
   title: z.string().default(""),
@@ -47,6 +56,8 @@ export const SceneSchema = z.object({
   scriptState: ContentStateSchema.default("draft"),
   characterIds: z.array(z.string()).default([]),
   continuityNotes: z.string().default(""),
+  dialogue: z.array(DialogueLineSchema).default([]),
+  dialogueState: ContentStateSchema.default("draft"),
   shots: z.array(ShotSchema).default([]),
 });
 
@@ -71,8 +82,16 @@ export const CharacterSchema = z.object({
   continuityNotes: z.string().default(""),
 });
 
+export const StorySchema = z.object({
+  idea: z.string().default(""),
+  logline: z.string().default(""),
+  outline: z.string().default(""),
+  outlineState: ContentStateSchema.default("draft"),
+});
+
 export const ProductionSchema = z.object({
   version: z.number().default(1),
+  story: StorySchema.default({}),
   scenes: z.array(SceneSchema).default([]),
   characters: z.array(CharacterSchema).default([]),
 });
@@ -83,12 +102,14 @@ export type ShotProvider = z.infer<typeof ShotProviderSchema>;
 export type Take = z.infer<typeof TakeSchema>;
 export type Shot = z.infer<typeof ShotSchema>;
 export type Scene = z.infer<typeof SceneSchema>;
+export type DialogueLine = z.infer<typeof DialogueLineSchema>;
+export type Story = z.infer<typeof StorySchema>;
 export type CharacterAppearance = z.infer<typeof CharacterAppearanceSchema>;
 export type Character = z.infer<typeof CharacterSchema>;
 export type Production = z.infer<typeof ProductionSchema>;
 
 export function emptyProduction(): Production {
-  return { version: 1, scenes: [], characters: [] };
+  return ProductionSchema.parse({});
 }
 
 export type SceneStatus = "empty" | "in-progress" | "attention" | "complete";
@@ -158,6 +179,24 @@ export function moveScene(p: Production, sceneId: string, toIndex: number): Prod
   if (from === -1) return p;
   const scenes = moveItem(p.scenes, from, toIndex);
   return scenes === p.scenes ? p : { ...p, scenes };
+}
+
+export function updateStory(p: Production, patch: Partial<Story>): Production {
+  return { ...p, story: { ...p.story, ...patch } };
+}
+
+/**
+ * Replaces a scene's shot list with new draft shots, keeping every shot that already has takes
+ * (and so possibly a timeline clip): regenerating a shot list never discards generated work.
+ */
+export function replaceDraftShots(p: Production, sceneId: string, shots: Partial<Shot>[]): Production {
+  const idx = p.scenes.findIndex((s) => s.id === sceneId);
+  if (idx === -1) return p;
+  const scene = p.scenes[idx]!;
+  const kept = scene.shots.filter((s) => s.takes.length > 0);
+  const scenes = [...p.scenes];
+  scenes[idx] = { ...scene, shots: [...kept, ...shots.map((s) => ShotSchema.parse(s))] };
+  return { ...p, scenes };
 }
 
 // --- shots ---

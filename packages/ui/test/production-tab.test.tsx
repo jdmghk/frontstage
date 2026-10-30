@@ -7,6 +7,7 @@ import { ProductionStore } from "../src/production/production-store.js";
 import { CharacterLibrary, createMemoryCharacterStorage } from "../src/production/character-library.js";
 import { fakeProductionLibrary } from "./production-fakes.js";
 import type { StudioMorphic } from "../src/production/morphic.js";
+import type { FlowExport, StudioWriter } from "../src/production/writer-ui.js";
 
 function setup() {
   const production = new ProductionStore();
@@ -231,5 +232,75 @@ describe("Morphic actions", () => {
     expect(kai.approvedDesignIds).toEqual([]);
     expect(screen.getByTestId("character-0-ref-0-pending")).toBeTruthy();
     expect(library.getSnapshot().folders.map((f) => f.name)).toEqual(["Characters", "Kai"]);
+  });
+});
+
+describe("Claude writing and the Flow hand-off", () => {
+  function setupWriter(reply: (prompt: string) => { ok: true; json: unknown } | { ok: false; kind: "refusal"; error: string }) {
+    const production = new ProductionStore();
+    const library = fakeProductionLibrary();
+    const prompts: string[] = [];
+    const writer: StudioWriter = {
+      gateway: { run: async (req) => (prompts.push(req.prompt), reply(req.prompt)), hasKey: async () => true },
+      model: () => "claude-sonnet-5-5",
+    };
+    return { production, library, writer, prompts };
+  }
+
+  test("Write outline fills the story and creates scenes", async () => {
+    const { production, library, writer } = setupWriter(() => ({
+      ok: true,
+      json: { logline: "Two rivals, one rooftop", outline: "They fight.", scenes: [{ title: "Arrival", synopsis: "a" }, { title: "Duel", synopsis: "b" }] },
+    }));
+    render(<ProductionTab production={production} library={library} writer={writer} />);
+    fireEvent.change(screen.getByTestId("story-idea"), { target: { value: "rivals settle a debt" } });
+    await act(async () => fireEvent.click(screen.getByTestId("story-write-outline")));
+    expect(production.getSnapshot().story).toMatchObject({ idea: "rivals settle a debt", logline: "Two rivals, one rooftop", outlineState: "draft" });
+    expect(production.getSnapshot().scenes.map((s) => s.title)).toEqual(["Arrival", "Duel"]);
+    expect(screen.getByTestId("story-message").textContent).toBe("Outline written with 2 scenes.");
+  });
+
+  test("a refusal shows Claude's message and changes nothing", async () => {
+    const { production, library, writer } = setupWriter(() => ({ ok: false, kind: "refusal", error: "Claude declined this request (bio)." }));
+    render(<ProductionTab production={production} library={library} writer={writer} />);
+    const before = production.getSnapshot();
+    await act(async () => fireEvent.click(screen.getByTestId("story-write-outline")));
+    expect(production.getSnapshot()).toBe(before);
+    expect(screen.getByTestId("story-message").textContent).toContain("declined");
+  });
+
+  test("Write script on one scene leaves the other scene untouched", async () => {
+    const { production, library, writer, prompts } = setupWriter(() => ({ ok: true, json: { script: "EXT. ROOF - NIGHT" } }));
+    render(<ProductionTab production={production} library={library} writer={writer} />);
+    fireEvent.click(screen.getByTestId("production-add-scene"));
+    fireEvent.click(screen.getByTestId("production-add-scene"));
+    const second = production.getSnapshot().scenes[1]!;
+    await act(async () => fireEvent.click(screen.getByTestId("scene-0-write-script")));
+    expect(production.getSnapshot().scenes[0]!.script).toBe("EXT. ROOF - NIGHT");
+    expect(production.getSnapshot().scenes[1]).toBe(second);
+    expect(prompts[0]).toContain("Scene 1: Scene 1");
+  });
+
+  test("no writer → no write buttons, and a hint to add a key", () => {
+    setup();
+    expect(screen.queryByTestId("story-write-outline")).toBeNull();
+    expect(screen.getByTestId("story-card").textContent).toContain("Add an Anthropic key");
+  });
+
+  test("Prepare for Flow sends the pack and marks the shot as a Flow shot", async () => {
+    const production = new ProductionStore();
+    const library = fakeProductionLibrary();
+    const packs: { folderName: string; files: string[]; images: string[] }[] = [];
+    const flowExport: FlowExport = async (pack, images) => (
+      packs.push({ folderName: pack.folderName, files: pack.files.map((f) => f.name), images: images.map((i) => i.name) }), { path: "/tmp/flow/x" }
+    );
+    render(<ProductionTab production={production} library={library} flowExport={flowExport} />);
+    await addSceneWithShot();
+    fireEvent.change(screen.getByTestId("shot-0-0-prompt"), { target: { value: "a man spins in the rain" } });
+    await act(async () => fireEvent.click(screen.getByTestId("shot-0-0-flow")));
+    expect(packs).toEqual([{ folderName: "01-01 Scene 1 - Shot 1", files: ["prompt.txt", "shot.md"], images: [] }]);
+    expect(production.getSnapshot().scenes[0]!.shots[0]!.provider).toBe("flow-manual");
+    expect((screen.getByTestId("shot-0-0-import-source") as HTMLSelectElement).value).toBe("flow-manual");
+    expect(screen.getByTestId("shot-0-0-message").textContent).toContain("/tmp/flow/x");
   });
 });

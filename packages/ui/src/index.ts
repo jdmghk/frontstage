@@ -69,6 +69,7 @@ export { CharacterLibrary, createOpfsCharacterStorage, createMemoryCharacterStor
 export type { CharacterLibraryStorage, ProjectMediaAccess } from "./production/character-library.js";
 export { MorphicAccountSection } from "./production/morphic.js";
 export type { StudioMorphic, MorphicAccount } from "./production/morphic.js";
+export type { StudioWriter, FlowExport } from "./production/writer-ui.js";
 export type { EditorMediaHost, EditorHostResult } from "./editor/editor-host.js";
 export type { ExportGateway, ExportTarget, ExportProgressFn, ExportRunOptions } from "./editor/export-gateway.js";
 export type { ExportState, ExportKind, FcpxmlExportOptions } from "./editor/use-export-command.js";
@@ -83,7 +84,7 @@ export { MentionInput } from "./agent/MentionInput.js";
 export type { MentionItem } from "./agent/MentionInput.js";
 export { useAgentSession } from "./agent/use-agent-session.js";
 export { SettingsPanel } from "./agent/SettingsPanel.js";
-export type { SettingsPanelProps, KeyConfig, FalKeyConfig, RelayConfig, RelayAuthState } from "./agent/SettingsPanel.js";
+export type { SettingsPanelProps, KeyConfig, FalKeyConfig, RelayConfig, RelayAuthState, ClaudeSettings } from "./agent/SettingsPanel.js";
 export { CONFIRM_THRESHOLD_STORAGE_KEY, DEFAULT_CONFIRM_THRESHOLD, readConfirmThreshold, writeConfirmThreshold } from "./agent/generation-settings.js";
 export { ModelPicker } from "./agent/ModelPicker.js";
 export type { ModelPickerProps } from "./agent/ModelPicker.js";

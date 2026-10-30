@@ -92,6 +92,11 @@ contextBridge.exposeInMainWorld("desktopCharacters", {
   remove: (id) => ipcRenderer.invoke("characters:remove", id),
 });
 
+contextBridge.exposeInMainWorld("desktopStudio", {
+  claudeRun: (req) => ipcRenderer.invoke("claude:run", req),
+  writeFlowPack: (pack) => ipcRenderer.invoke("studio:writeFlowPack", pack),
+});
+
 contextBridge.exposeInMainWorld("desktopMorphic", {
   status: () => ipcRenderer.invoke("morphic:status"),
   signIn: () => ipcRenderer.invoke("morphic:signIn"),

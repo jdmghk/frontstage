@@ -16,6 +16,7 @@ import { CharactersTab, type CharactersLibrary } from "../production/CharactersT
 import type { ProductionStore } from "../production/production-store.js";
 import type { CharacterLibrary } from "../production/character-library.js";
 import type { StudioMorphic } from "../production/morphic.js";
+import type { FlowExport, StudioWriter } from "../production/writer-ui.js";
 
 const MODEL_LABEL: Record<MissingModel, string> = { embedding: "Search model", transcription: "Transcription model" };
 // Downloaded in this fixed order regardless of Set iteration order — embedding is the older/
@@ -74,6 +75,8 @@ export interface MediaPanelProps {
   production?: ProductionStore;
   characterLibrary?: CharacterLibrary;
   morphic?: StudioMorphic;
+  writer?: StudioWriter;
+  flowExport?: FlowExport;
 }
 
 type PanelTab = "media" | "captions" | "production" | "characters";
@@ -109,7 +112,7 @@ const TAB_ICON_SIZE = 18;
 const HEADER_ICON_SIZE = 10;
 const OVERFLOW_ICON_FRAME = "sm" as const;
 
-export function MediaPanel({ library, onItemPointerDown, store, executor, transcription, indexing, dragOverFolderId, production, characterLibrary, morphic }: MediaPanelProps) {
+export function MediaPanel({ library, onItemPointerDown, store, executor, transcription, indexing, dragOverFolderId, production, characterLibrary, morphic, writer, flowExport }: MediaPanelProps) {
   const panelTabs = production ? MEDIA_PANEL_TABS : MEDIA_PANEL_TABS.filter((t) => !PRODUCTION_TABS.has(t.id));
   const indexStatus = useSyncExternalStore(
     indexing?.subscribe ?? noopSubscribe,
@@ -621,7 +624,7 @@ export function MediaPanel({ library, onItemPointerDown, store, executor, transc
           </div>
         </>
       ) : tab === "production" && production ? (
-        <ProductionTab production={production} library={library} store={store} morphic={morphic} />
+        <ProductionTab production={production} library={library} store={store} morphic={morphic} writer={writer} flowExport={flowExport} />
       ) : tab === "characters" && production ? (
         <CharactersTab production={production} library={asCharactersLibrary(library)} characterLibrary={characterLibrary} morphic={morphic} />
       ) : store && executor && transcription ? (

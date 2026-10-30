@@ -16,6 +16,8 @@ import {
   setShotStatus,
   shotReferenceMediaIds,
   syncGeneratingShots,
+  replaceDraftShots,
+  updateStory,
   updateShot,
   upsertCharacter,
   type Production,
@@ -34,7 +36,7 @@ function twoScenes(): { p: Production; s1: string; s2: string; a: string; b: str
 
 describe("production schema", () => {
   test("parses an empty object to defaults", () => {
-    expect(ProductionSchema.parse({})).toEqual({ version: 1, scenes: [], characters: [] });
+    expect(ProductionSchema.parse({})).toEqual({ version: 1, story: { idea: "", logline: "", outline: "", outlineState: "draft" }, scenes: [], characters: [] });
   });
 
   test("fills shot defaults and keeps unknown-free round trip", () => {
@@ -204,5 +206,31 @@ describe("syncGeneratingShots", () => {
     const { p, shotId } = generatingShot();
     const approved = approveTake(p, shotId, "m1");
     expect(syncGeneratingShots(approved, () => ({ kind: "failed", message: "x" }))).toBe(approved);
+  });
+});
+
+describe("story, dialogue and shot-list replacement", () => {
+  test("old production.json (no story/dialogue) still parses with defaults", () => {
+    const p = ProductionSchema.parse({ scenes: [{ title: "A", shots: [] }] });
+    expect(p.story).toEqual({ idea: "", logline: "", outline: "", outlineState: "draft" });
+    expect(p.scenes[0]!.dialogue).toEqual([]);
+    expect(p.scenes[0]!.dialogueState).toBe("draft");
+  });
+
+  test("replaceDraftShots keeps shots with takes and replaces the rest", () => {
+    let p = emptyProduction();
+    const s = addScene(p, { title: "A" });
+    p = s.production;
+    const keep = addShot(p, s.sceneId, { title: "has take" });
+    p = attachTake(keep.production, keep.shotId!, { mediaId: "m1" });
+    p = addShot(p, s.sceneId, { title: "empty draft" }).production;
+    p = replaceDraftShots(p, s.sceneId, [{ title: "new 1", durationSec: 4 }, { title: "new 2" }]);
+    expect(p.scenes[0]!.shots.map((x) => x.title)).toEqual(["has take", "new 1", "new 2"]);
+    expect(p.scenes[0]!.shots[0]!.id).toBe(keep.shotId);
+  });
+
+  test("updateStory merges", () => {
+    const p = updateStory(emptyProduction(), { idea: "two rivals on a rooftop" });
+    expect(updateStory(p, { logline: "x" }).story).toMatchObject({ idea: "two rivals on a rooftop", logline: "x" });
   });
 });
