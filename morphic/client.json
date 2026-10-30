@@ -1,0 +1,13 @@
+{
+  "client_id": "https://jdmghk.github.io/frontstage/morphic/client.json",
+  "client_name": "Frontstage Studio",
+  "client_uri": "https://github.com/jdmghk/frontstage",
+  "redirect_uris": [
+    "http://127.0.0.1:53917/morphic/callback",
+    "http://localhost:53917/morphic/callback"
+  ],
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "none",
+  "scope": "projects:read assets:read assets:write generations:write"
+}
