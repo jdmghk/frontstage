@@ -1,8 +1,24 @@
-import { _electron as electron, test, expect } from "@playwright/test";
+import { _electron as electron, test, expect, type ElectronApplication, type Page } from "@playwright/test";
 import { existsSync, mkdtempSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import os from "node:os";
 import path from "node:path";
+
+/**
+ * Runs a File-menu command the way the user would on this platform: the in-app File menu on
+ * Windows/Linux, the native menu bar on macOS (which sends the same "menu:command" IPC).
+ */
+async function fileMenu(app: ElectronApplication, page: Page, testid: string, command: string, arg?: string): Promise<void> {
+  if (await page.locator('[data-testid="file-menu"]').isVisible().catch(() => false)) {
+    await page.click('[data-testid="file-menu"]');
+    await page.click(`[data-testid="${testid}"]`);
+    return;
+  }
+  await app.evaluate(({ BrowserWindow }, [c, a]) => {
+    BrowserWindow.getAllWindows()[0]!.webContents.send("menu:command", c, a);
+  }, [command, arg] as const);
+}
+
 
 test("Editor: panels render, on-disk round-trip, and menu IPC routing", async () => {
   const tempA = mkdtempSync(join(os.tmpdir(), "frontstage-editor-test-"));
@@ -50,8 +66,7 @@ test("Editor: panels render, on-disk round-trip, and menu IPC routing", async ()
     }, tempA);
 
     // Trigger Save As via the in-app file menu (uses the same guarded handler)
-    await page.click('[data-testid="file-menu"]');
-    await page.click('[data-testid="file-save-as"]');
+    await fileMenu(app, page, "file-save-as", "save-as");
 
     // Wait for project.json to appear on disk (poll via JS side-effect)
     await page.waitForFunction(
@@ -84,8 +99,7 @@ test("Editor: panels render, on-disk round-trip, and menu IPC routing", async ()
       // The discard dialog will appear since fps was changed.
     });
 
-    await page.click('[data-testid="file-menu"]');
-    await page.click('[data-testid="file-new"]');
+    await fileMenu(app, page, "file-new", "new");
 
     // Discard dialog should appear because the store is dirty
     await page.waitForSelector('[data-testid="discard-dialog"]', { timeout: 5_000 });
@@ -106,8 +120,7 @@ test("Editor: panels render, on-disk round-trip, and menu IPC routing", async ()
       await (window as any).desktopProject.__setNextPick(dir);
     }, tempA);
 
-    await page.click('[data-testid="file-menu"]');
-    await page.click('[data-testid="file-open"]');
+    await fileMenu(app, page, "file-open", "open");
 
     // Wait for timeline to be loaded from disk (fps should be 30, the default)
     await page.waitForFunction(

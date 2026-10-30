@@ -132,8 +132,10 @@ test("MCP server: 200 with token, 401 no token, 403 bad origin, regenerate, disa
     const toolsResult = await client.listTools();
     expect(Array.isArray(toolsResult.tools)).toBe(true);
 
-    // Real catalog: 14 tools from the renderer bridge (not the stub ping)
-    expect(toolsResult.tools.length).toBe(14);
+    // Real catalog from the renderer bridge (not the stub ping): 51 tools as of v0.2.0 (see the
+    // landing page's MCP tool count); every name is unique.
+    expect(toolsResult.tools.length).toBe(51);
+    expect(new Set(toolsResult.tools.map((t: any) => t.name)).size).toBe(toolsResult.tools.length);
     const toolNames = toolsResult.tools.map((t: any) => t.name);
     expect(toolNames).toContain("add_clips");
     expect(toolNames).toContain("add_texts");

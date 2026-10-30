@@ -1,8 +1,24 @@
-import { _electron as electron, test, expect } from "@playwright/test";
+import { _electron as electron, test, expect, type ElectronApplication, type Page } from "@playwright/test";
 import { existsSync, mkdtempSync, mkdirSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import os from "node:os";
 import path from "node:path";
+
+/**
+ * Runs a File-menu command the way the user would on this platform: the in-app File menu on
+ * Windows/Linux, the native menu bar on macOS (which sends the same "menu:command" IPC).
+ */
+async function fileMenu(app: ElectronApplication, page: Page, testid: string, command: string, arg?: string): Promise<void> {
+  if (await page.locator('[data-testid="file-menu"]').isVisible().catch(() => false)) {
+    await page.click('[data-testid="file-menu"]');
+    await page.click(`[data-testid="${testid}"]`);
+    return;
+  }
+  await app.evaluate(({ BrowserWindow }, [c, a]) => {
+    BrowserWindow.getAllWindows()[0]!.webContents.send("menu:command", c, a);
+  }, [command, arg] as const);
+}
+
 
 test("DesktopExportGateway: real FFmpeg export to picked path + unauthorized reject", async () => {
   const tempDir = mkdtempSync(join(os.tmpdir(), "frontstage-export-e2e-"));
@@ -115,8 +131,7 @@ test("DesktopExportGateway: real FFmpeg export to picked path + unauthorized rej
     }, outFile);
 
     // Trigger export via the File menu
-    await page.click('[data-testid="file-menu"]');
-    await page.click('[data-testid="file-export-video"]');
+    await fileMenu(app, page, "file-export-video", "export", "video");
 
     // Export progress overlay should appear
     await page.waitForSelector('[data-testid="export-progress"]', { timeout: 10_000 });
