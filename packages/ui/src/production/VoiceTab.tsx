@@ -327,10 +327,12 @@ export function VoiceTab({ production, library, store, voice, exportFolder }: Vo
           </div>
         )}
         {p.voices.map((v, vi) => (
-          <div key={v.id} style={{ ...rowStyle, flexWrap: "wrap" }} data-testid={`voice-${vi}`}>
+          <div key={v.id} style={rowStyle} data-testid={`voice-${vi}`}>
             <PlayButton library={library} mediaId={v.referenceMediaId} testid={`voice-${vi}-play`} />
             <TextInput value={v.name} onChange={(name) => name.trim() && production.update((c) => updateVoiceProfile(c, v.id, { name }))} style={{ flex: 1, minWidth: 0 }} />
-            <Select value={v.language} options={LANGUAGE_OPTIONS} onChange={(language) => production.update((c) => updateVoiceProfile(c, v.id, { language }))} />
+            <div style={{ flex: "0 0 9em" }}>
+              <Select value={v.language} options={LANGUAGE_OPTIONS} onChange={(language) => production.update((c) => updateVoiceProfile(c, v.id, { language }))} />
+            </div>
             <IconButton frame="sm" title="Delete voice (recorded lines are kept)" testid={`voice-${vi}-delete`} onClick={() => production.update((c) => removeVoiceProfile(c, v.id))}>
               <Icon name="trash" size={10} />
             </IconButton>

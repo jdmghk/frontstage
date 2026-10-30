@@ -398,7 +398,7 @@ function ShotCard({ p, scene, sceneIndex, shot, index, open, onToggle, productio
           <Field label="Action / description">
             <TextArea value={shot.description} onChange={(description) => set({ description })} rows={2} testid={`${tid}-description`} />
           </Field>
-          <div style={rowStyle}>
+          <div style={{ display: "grid", gridTemplateColumns: "5em minmax(0, 1fr) minmax(0, 1fr)", gap: theme.spacing.xs }}>
             <Field label="Seconds">
               <TextInput
                 type="number"
@@ -409,7 +409,7 @@ function ShotCard({ p, scene, sceneIndex, shot, index, open, onToggle, productio
                   const n = Number(v);
                   if (Number.isFinite(n) && n > 0) set({ durationSec: n });
                 }}
-                style={{ width: "4em" }}
+                testid={`${tid}-seconds`}
               />
             </Field>
             <Field label="Camera">

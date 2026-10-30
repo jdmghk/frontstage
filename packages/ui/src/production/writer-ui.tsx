@@ -145,14 +145,16 @@ export function DialogueEditor({ p, scene, production, tid }: { p: Production; s
         return (
           <div key={line.id} style={{ display: "flex", flexDirection: "column", gap: theme.spacing.xxs }} data-testid={`${tid}-line-${i}`}>
             <div style={rowStyle}>
-              <Select
-                value={known ? line.speaker : null}
-                placeholder={known ? "Speaker" : line.speaker}
-                options={speakers}
-                onChange={(speaker) => edit(i, { speaker })}
-                testid={`${tid}-line-${i}-speaker`}
-              />
-              <TextInput value={line.direction} placeholder="delivery" onChange={(direction) => edit(i, { direction })} style={{ flex: 1, minWidth: 0 }} />
+              <div style={{ flex: "0 0 40%", minWidth: 0 }}>
+                <Select
+                  value={known ? line.speaker : null}
+                  placeholder={known ? "Speaker" : line.speaker}
+                  options={speakers}
+                  onChange={(speaker) => edit(i, { speaker })}
+                  testid={`${tid}-line-${i}-speaker`}
+                />
+              </div>
+              <TextInput value={line.direction} placeholder="delivery, e.g. cold, quiet" onChange={(direction) => edit(i, { direction })} style={{ flex: 1, minWidth: 0 }} testid={`${tid}-line-${i}-direction`} />
               <IconButton frame="xs" title="Remove line" onClick={() => setLines(scene.dialogue.filter((_, j) => j !== i))}>
                 <Icon name="x" size={8} />
               </IconButton>

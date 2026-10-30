@@ -21,7 +21,7 @@ import type { Clip, Transform, Crop, TextStyle, TextFillMode } from "@frontstage
 import type { PlaybackEngine } from "@frontstage/engine";
 import { useStore } from "../store/use-store.js";
 import { theme } from "../theme/theme.js";
-import { SegmentedTabs } from "../primitives/index.js";
+import { Button, SegmentedTabs } from "../primitives/index.js";
 import { NumberField, SliderField, ToggleField, TextField, Section, rowStyle, labelStyle } from "./fields.js";
 import { KeyframeLanes } from "./KeyframeLanes.js";
 import { BasicCorrectionSection } from "./adjust/BasicCorrectionSection.js";
@@ -509,10 +509,9 @@ function DissolveSection({ store, clip, fps }: { store: EditorStore; clip: Clip;
   return (
     <Section title="Transition">
       <NumberField label="Dissolve frames" value={frames} step={1} min={1} onChange={(v) => setFrames(Math.max(1, Math.round(v)))} />
-      <button
-        type="button"
-        data-testid="inspector-cross-dissolve"
-        style={{ ...labelStyle, cursor: "pointer", background: "none", border: "none", padding: 0, color: theme.accent.primary, textAlign: "left" }}
+      <Button
+        size="small"
+        testid="inspector-cross-dissolve"
         onClick={() => {
           const plan = planCrossDissolve(store.getSnapshot().timeline, clip.id, frames);
           if (!plan.ok) return setMessage(plan.message);
@@ -521,7 +520,7 @@ function DissolveSection({ store, clip, fps }: { store: EditorStore; clip: Clip;
         }}
       >
         Cross-dissolve from previous clip
-      </button>
+      </Button>
       {message && (
         <div data-testid="inspector-cross-dissolve-message" style={{ ...labelStyle, whiteSpace: "normal" }}>
           {message}
