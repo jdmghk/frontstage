@@ -9,6 +9,8 @@ export interface Track {
   muted: boolean;
   hidden: boolean;
   syncLocked: boolean;
+  /** Track volume in dB (-60…+12) on top of clip volume; absent = 0 dB. */
+  gainDb?: number;
   displayHeight?: number;
   clips: Clip[];
 }

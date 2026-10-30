@@ -6,6 +6,7 @@ import {
   RULER_HEIGHT,
   DEFAULT_TRACK_HEIGHT,
   toggleTrackMuteCommand,
+  setTrackGainCommand,
   toggleTrackHiddenCommand,
   toggleTrackSyncLockCommand,
   reorderTrackCommand,
@@ -179,6 +180,28 @@ export function TrackHeaders({ store }: { store: EditorStore }) {
               </span>
             )}
             <div style={{ display: "flex", alignItems: "center", gap: theme.spacing.xs }}>
+              {track.type === "audio" && (
+                <input
+                  type="number"
+                  min={-60}
+                  max={12}
+                  step={1}
+                  value={track.gainDb ?? 0}
+                  title="Track volume (dB) — applied on top of each clip's volume"
+                  aria-label="Track volume in dB"
+                  data-testid={`track-gain-${track.id}`}
+                  onChange={(e) => store.dispatch(setTrackGainCommand(track.id, Number(e.target.value), `gain-${track.id}`))}
+                  style={{
+                    width: 40,
+                    background: "transparent",
+                    border: "none",
+                    color: track.gainDb ? theme.text.primary : theme.text.tertiary,
+                    fontSize: theme.fontSize.xs,
+                    textAlign: "right",
+                    padding: 0,
+                  }}
+                />
+              )}
               <IconButton
                 frame="xs"
                 testid={`track-synclock-${track.id}`}

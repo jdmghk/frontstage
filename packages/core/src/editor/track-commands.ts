@@ -48,6 +48,26 @@ export function toggleTrackSyncLockCommand(trackId: string): Command {
   return toggleTrackFlagCommand(trackId, "syncLocked", "Sync Lock Track");
 }
 
+/** Track volume in dB, clamped to -60…+12; 0 removes the field. Coalesces while dragging/typing. */
+export function setTrackGainCommand(trackId: string, db: number, coalesceKey?: string): Command {
+  return {
+    label: "Track Volume",
+    coalesceKey,
+    apply(timeline: Timeline): Timeline {
+      if (!Number.isFinite(db)) return timeline;
+      const v = Math.round(Math.max(-60, Math.min(12, db)) * 10) / 10;
+      let changed = false;
+      const tracks = timeline.tracks.map((t) => {
+        if (t.id !== trackId || (t.gainDb ?? 0) === v) return t;
+        changed = true;
+        const { gainDb: _old, ...rest } = t;
+        return v === 0 ? rest : { ...rest, gainDb: v };
+      });
+      return changed ? { ...timeline, tracks } : timeline;
+    },
+  };
+}
+
 export function setTrackHeightCommand(trackId: string, height: number): Command {
   return {
     label: "Resize Track",

@@ -400,3 +400,66 @@ describe("GenerationService.dispose", () => {
     svc.dispose();
   });
 });
+
+describe("GenerationService retries", () => {
+  const fastOpts = { pollDelay: () => 0, sleep: () => Promise.resolve() };
+  const ph = () => makePlaceholder("p1");
+
+  test("a 429 at submit is retried and the job then runs", async () => {
+    let submits = 0;
+    const gw: GenJobGateway = {
+      submitJob: async () => {
+        if (++submits < 3) throw new Error("429 rate limited");
+        return { jobId: "j" };
+      },
+      jobStatus: async () => ({ status: "succeeded", resultUrls: ["u"] }),
+      downloadResult: async () => new Uint8Array([1]),
+      uploadFile: async () => "",
+      hasKey: async () => true,
+    };
+    const { host, events } = makeHost();
+    const svc = new GenerationService(gw, host, fastOpts);
+    const p = ph();
+    host.addPlaceholder(p);
+    expect(await svc.startJob({ modelEndpoint: "m", input: {}, placeholders: [p], model: "m" })).toEqual({ jobId: "j" });
+    await flush();
+    expect(submits).toBe(3);
+    expect(events.some((e) => e.startsWith("finalize:p1"))).toBe(true);
+  });
+
+  test("a network error at submit is NOT retried (the job may have started)", async () => {
+    let submits = 0;
+    const gw = { submitJob: async () => { submits++; throw new Error("fetch failed"); } } as unknown as GenJobGateway;
+    const { host } = makeHost();
+    const svc = new GenerationService(gw, host, fastOpts);
+    const p = ph();
+    host.addPlaceholder(p);
+    expect(await svc.startJob({ modelEndpoint: "m", input: {}, placeholders: [p], model: "m" })).toEqual({ error: "fetch failed" });
+    expect(submits).toBe(1);
+  });
+
+  test("transient poll errors are tolerated; three in a row fail the job", async () => {
+    const run = async (errorsBeforeSuccess: number) => {
+      let polls = 0;
+      const gw: GenJobGateway = {
+        submitJob: async () => ({ jobId: "j" }),
+        jobStatus: async () => {
+          if (++polls <= errorsBeforeSuccess) throw new Error("503 unavailable");
+          return { status: "succeeded", resultUrls: ["u"] };
+        },
+        downloadResult: async () => new Uint8Array([1]),
+        uploadFile: async () => "",
+        hasKey: async () => true,
+      };
+      const { host, events } = makeHost();
+      const svc = new GenerationService(gw, host, fastOpts);
+      const p = ph();
+      host.addPlaceholder(p);
+      await svc.startJob({ modelEndpoint: "m", input: {}, placeholders: [p], model: "m" });
+      for (let i = 0; i < 10; i++) await flush();
+      return events;
+    };
+    expect((await run(2)).some((e) => e.startsWith("finalize:p1"))).toBe(true);
+    expect((await run(3)).some((e) => e === "failed:p1:503 unavailable")).toBe(true);
+  });
+});

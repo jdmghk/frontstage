@@ -42,6 +42,24 @@ function toMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+// Gateways report HTTP failures as "<status> <body>" (fal-wire / desktop IPC convention).
+const REJECTED_STATUS = /^(429|502|503|504)\b/;
+const TRANSIENT = /^(408|425|429|5\d\d)\b|fetch failed|ECONNRESET|ETIMEDOUT|EAI_AGAIN|socket hang up|network/i;
+
+/** The server refused the submit outright (nothing started), so sending it again can't double-charge. */
+export function isRejectedSubmit(message: string): boolean {
+  return REJECTED_STATUS.test(message);
+}
+
+/** A poll failure worth retrying: status reads are read-only, so any transient error qualifies. */
+export function isTransientError(message: string): boolean {
+  return TRANSIENT.test(message);
+}
+
+/** Attempts per submit and consecutive poll failures tolerated before a job is marked failed. */
+export const MAX_ATTEMPTS = 3;
+const retryDelayMs = (attempt: number) => 2000 * 2 ** (attempt - 1);
+
 function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -64,8 +82,15 @@ export class GenerationService {
   async startJob(args: StartJobArgs): Promise<{ jobId: string } | { error: string }> {
     let jobId: string;
     try {
-      const submitted = await this.gateway.submitJob(args.modelEndpoint, args.input);
-      jobId = submitted.jobId;
+      for (let attempt = 1; ; attempt++) {
+        try {
+          jobId = (await this.gateway.submitJob(args.modelEndpoint, args.input)).jobId;
+          break;
+        } catch (err) {
+          if (attempt >= MAX_ATTEMPTS || !isRejectedSubmit(toMessage(err))) throw err;
+          await this.sleep(retryDelayMs(attempt));
+        }
+      }
     } catch (err) {
       const message = toMessage(err);
       this.host.markGenerationFailed(
@@ -152,12 +177,20 @@ export class GenerationService {
   private async pollLoop(group: JobGroup): Promise<void> {
     try {
       let delay: number | undefined;
+      let failures = 0;
       for (;;) {
         delay = this.pollDelay(delay);
         await this.sleep(delay);
         if (!this.active.has(group.jobId)) return;
 
-        const status = await this.gateway.jobStatus(group.modelEndpoint, group.jobId);
+        let status;
+        try {
+          status = await this.gateway.jobStatus(group.modelEndpoint, group.jobId);
+          failures = 0;
+        } catch (err) {
+          if (++failures >= MAX_ATTEMPTS || !isTransientError(toMessage(err))) throw err;
+          continue;
+        }
 
         if (status.status === "queued" || status.status === "running") continue;
 

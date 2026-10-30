@@ -234,6 +234,8 @@ export const TrackSchema = z.object({
   muted: z.boolean().default(false),
   hidden: z.boolean().default(false),
   syncLocked: z.boolean().default(true),
+  /** Track volume in dB (-60…+12), applied on top of each clip's volume. Absent = 0 dB. */
+  gainDb: z.number().min(-60).max(12).optional(),
   displayHeight: z.number().optional(),
   clips: z.array(ClipSchema).default([]),
 });

@@ -4,6 +4,7 @@ import { cuesFromCaptionClips, exportFcpxml, exportXmeml, formatSrt, formatVtt, 
 import type { MediaByteSource } from "@frontstage/engine";
 import type { ToolContext } from "@frontstage/ai";
 import type { ExportGateway } from "./export-gateway.js";
+import { exportInfo } from "./export-presets.js";
 import type { RunProjectCommand } from "./Editor.js";
 
 export type ExportKind = "video" | "fcpxml" | "xmeml" | "srt" | "vtt";
@@ -46,7 +47,7 @@ export function useExportCommand(opts: {
     runningRef.current = true;
     runProjectCommand(async () => {
       try {
-        const t = await exportGateway.pickTarget(suggestedName());
+        const t = await exportGateway.pickTarget(suggestedName(), exportInfo(getTimeline(), getMediaEntries?.() ?? []));
         if (!t) return;
         setExportState({ label: t.label, done: 0, total: 1 });
         try {

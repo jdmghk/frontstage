@@ -41,7 +41,13 @@ rail, no separate dashboard.
 | Fight choreography: frame sampling + Claude shot plan | **Implemented** (desktop) | **Analyze** samples ≤20 frames with the bundled ffmpeg and asks Claude for shots: positions, action, camera, framing, transitions, impact times, continuity, prompt |
 | Fight choreography: edit, approve → scene shots | **Implemented** | Edit every field; **Approve → add shots** appends them to the chosen scene as draft shots |
 | Motion transfer from the reference | Not supported | The plan describes the moves; no current integrated generator copies the reference's motion |
-| YouTube export presets | Not yet | Phase 6 |
+| YouTube export presets (1080p, 4K, 16:9) | **Implemented** (Phase 6, desktop) | File → Export Video asks *Timeline size / YouTube 1080p / YouTube 4K*; YouTube presets encode H.264 High CRF 18 (preset slow), yuv420p, AAC 320 kbps 48 kHz, faststart. Disabled with a reason on non-16:9 timelines; warns when sources are smaller than the output |
+| Export presets in the web editor | Not yet | The web encoder is fixed H.264 Baseline at 5 Mbps; 4K isn't possible there |
+| Per-track volume | **Implemented** | Audio track header dB field (-60…+12), on top of each clip's volume; applies to preview and export; undoable |
+| Cross-dissolve | **Implemented** | Inspector → Transition → **Cross-dissolve from previous clip**: the clip moves to a track above and fades in over the previous one; nothing else moves. Needs spare footage on one side (it says how much) |
+| Other transition types (wipes, slides) | Not supported | Dissolve plus the existing fades only |
+| Automatic retry of generation jobs | **Implemented** | A submit refused with 429/502/503/504 is retried up to 3 times with backoff (never a network error, which may have started the job); up to 3 consecutive failed status checks are tolerated |
+| Subtitles | Existing feature | Captions tab: Whisper transcription, caption clips burned into the export, SRT/VTT export (File → Captions) for YouTube upload |
 
 ## How it's stored
 
@@ -121,6 +127,17 @@ A cloned voice resembles the reference but isn't identical; expressiveness and p
 This is analysis, not motion transfer: generators get a precise description and the cast's
 references, and the result will differ from the reference footage.
 
+## Finishing and export
+
+1. **Mix**: name audio tracks (double-click the name) e.g. *Dialogue*, *Music*, *SFX*, and set each
+   track's level in dB in its header; clip volume and fades still work per clip.
+2. **Transitions**: select the second of two adjacent clips → Inspector → Transition → set frames →
+   **Cross-dissolve from previous clip**. One undo removes it.
+3. **Captions**: Captions tab → transcribe → style; they're burned into the video. For YouTube's own
+   captions, File → **Captions (SRT)…** and upload the file next to the video.
+4. **Export**: File → Export Video → pick **YouTube 1080p** or **YouTube 4K** → choose where to save.
+   The timeline must be 16:9; 4K from 1080p sources is an upscale and the dialog says so.
+
 ## Using it
 
 1. **Characters tab** → **+ Character**. Fill in appearance, **Add reference images…**, and click
@@ -150,6 +167,10 @@ character in every clip.
   `packages/ui/test/voice-tab.test.tsx`
 - Choreography: `packages/core/test/choreography.test.ts`, `packages/ai/test/choreography-task.test.ts`,
   `apps/desktop/test/frame-sampler.test.ts`, `packages/ui/test/choreo-tab.test.tsx`
+- Finishing: `packages/core/test/track-gain.test.ts`, `cross-dissolve.test.ts`, `packages/ui/test/export-presets.test.ts`,
+  `apps/desktop/test/export-codecs.test.ts`; generation retries in `packages/ai/test/generation-service.test.ts`.
+  The YouTube encoder settings were also checked against real output with ffprobe (H.264 High, yuv420p,
+  AAC 48 kHz, moov before mdat).
 - Claude + Flow: `packages/ai/test/studio-writer.test.ts` (schemas, apply rules, refusal, wrong-shape
   replies, Flow pack), `apps/desktop/test/claude-studio.test.ts` (request checks, fallbacks, error
   mapping), Claude/Flow cases in `packages/ui/test/production-tab.test.tsx`

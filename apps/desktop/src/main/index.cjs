@@ -705,12 +705,15 @@ let sessionCounter = 0;
 // but use a session ID so the protocol is forward-compatible.
 let activeSession = null;
 
-const CODECS = {
-  prores_ks: { ext: ".mov", vargs: ["-c:v", "prores_ks", "-profile:v", "3"] },
-  libx264: { ext: ".mp4", vargs: ["-c:v", "libx264", "-pix_fmt", "yuv420p"] },
-};
+let _exportCodecsMod = null;
+async function loadExportCodecs() {
+  if (!_exportCodecsMod) _exportCodecsMod = await import("./export-codecs.mjs");
+  return _exportCodecsMod;
+}
 
 ipcMain.handle("export:start", async (_event, { width, height, fps, audio, codec, outPath }) => {
+  const codecsMod = await loadExportCodecs();
+  const CODECS = codecsMod.CODECS;
   if (activeSession !== null) {
     throw new Error("export already in progress; call export:finish first");
   }
@@ -719,7 +722,7 @@ ipcMain.handle("export:start", async (_event, { width, height, fps, audio, codec
   }
 
   // Codec allowlist — reject anything not in the map
-  const spec = CODECS[codec];
+  const spec = Object.hasOwn(CODECS, codec) ? CODECS[codec] : undefined;
   if (!spec) throw new Error("unsupported codec: " + String(codec));
 
   // Output-path containment — must be in an authorized dir (user-picked via pickExportSave) or in os.tmpdir() (test harness only)
@@ -744,16 +747,7 @@ ipcMain.handle("export:start", async (_event, { width, height, fps, audio, codec
       audioFd = fs.openSync(audioPath, "w");
     }
 
-    const videoArgs = [
-      "-y",
-      "-f", "rawvideo",
-      "-pix_fmt", "rgba",
-      "-s", `${width}x${height}`,
-      "-r", String(fps),
-      "-i", "pipe:0",
-      ...spec.vargs,
-      videoOnlyPath,
-    ];
+    const videoArgs = codecsMod.videoArgs(spec, { width, height, fps }, videoOnlyPath);
 
     videoProc = spawn(ffmpegPath, videoArgs, { stdio: ["pipe", "pipe", "pipe"] });
 
@@ -821,21 +815,9 @@ ipcMain.handle("export:finish", async (_event) => {
 
   // Two-pass mux: combine video-only file + raw audio into final output
   const { audio } = opts;
+  const codecsMod = await loadExportCodecs();
   await new Promise((resolve, reject) => {
-    const muxArgs = [
-      "-y",
-      "-i", videoOnlyPath,
-      "-f", "f32le",
-      "-ar", String(audio.sampleRate),
-      "-ac", String(audio.channels),
-      "-i", audioPath,
-      "-map", "0:v",
-      "-map", "1:a",
-      "-c:v", "copy",
-      "-c:a", "aac",
-      "-shortest",
-      opts.outPath,
-    ];
+    const muxArgs = codecsMod.muxArgs(codecsMod.CODECS[opts.codec], audio, videoOnlyPath, audioPath, opts.outPath);
 
     const muxProc = spawn(ffmpegPath, muxArgs, { stdio: ["ignore", "pipe", "pipe"] });
     let muxStderr = "";
@@ -1790,4 +1772,27 @@ ipcMain.handle("media:sampleFrames", async (_e, req) => {
   } catch (err) {
     return { error: String(err && err.message ? err.message : err) };
   }
+});
+
+// Export size presets (timeline / YouTube 1080p / 4K) as a native dialog, so it works from both the
+// macOS menu bar and the in-app File menu. Returns the chosen preset id, or null on cancel.
+ipcMain.handle("export:choosePreset", async (e, { options }) => {
+  const enabled = (options ?? []).filter((o) => o && o.enabled && typeof o.id === "string" && typeof o.label === "string");
+  if (enabled.length === 0) return null;
+  // Headless tests can't click a dialog: take FRONTSTAGE_E2E_EXPORT_PRESET or the first option.
+  if (process.env.FRONTSTAGE_E2E === "1") {
+    const want = process.env.FRONTSTAGE_E2E_EXPORT_PRESET;
+    return (enabled.find((o) => o.id === want) ?? enabled[0]).id;
+  }
+  const detail = (options ?? []).filter((o) => o && o.note).map((o) => `${o.label}: ${o.note}`).join("\n");
+  const win = BrowserWindow.fromWebContents(e.sender);
+  const r = await dialog.showMessageBox(win, {
+    type: "question",
+    message: "Export size",
+    detail: detail || "YouTube presets use H.264 High (CRF 18) with 320 kbps AAC audio.",
+    buttons: [...enabled.map((o) => o.label), "Cancel"],
+    cancelId: enabled.length,
+    defaultId: 0,
+  });
+  return r.response < enabled.length ? enabled[r.response].id : null;
 });

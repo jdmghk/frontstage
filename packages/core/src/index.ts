@@ -66,6 +66,7 @@ export * from "./editor/caption-commands.js";
 export * from "./editor/keyframe-commands.js";
 export * from "./editor/link-commands.js";
 export * from "./editor/track-commands.js";
+export * from "./editor/transition-commands.js";
 export * from "./editor/ripple-commands.js";
 export * from "./editor/marker-commands.js";
 export * from "./editor/slip-commands.js";

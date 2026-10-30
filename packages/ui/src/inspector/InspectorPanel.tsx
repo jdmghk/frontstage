@@ -9,6 +9,8 @@ import {
   setClipCropCommand,
   setClipPropertyCommand,
   setFadeCommand,
+  crossDissolveCommand,
+  planCrossDissolve,
   setKeyframeCommand,
   setClipTextStyleCommand,
   setClipTextFillModeCommand,
@@ -304,6 +306,8 @@ export function InspectorPanel({ store, library, engineRef, lutReconciler }: Ins
         </Section>
       )}
 
+      {(clip.mediaType === "video" || clip.mediaType === "image") && <DissolveSection store={store} clip={clip} fps={timeline.fps} />}
+
       {/* Volume */}
       {hasAudio && (
         <Section title="Volume">
@@ -494,6 +498,36 @@ export function InspectorPanel({ store, library, engineRef, lutReconciler }: Ins
         <BlendControl store={store} clipIds={[clipId]} />
       )}
     </div>
+  );
+}
+
+/** Cross-dissolve from the clip before this one (same track): this clip moves up a track and fades in over it. */
+function DissolveSection({ store, clip, fps }: { store: EditorStore; clip: Clip; fps: number }) {
+  const [frames, setFrames] = useState(() => Math.round(fps / 2));
+  const [message, setMessage] = useState<string | null>(null);
+  useEffect(() => setMessage(null), [clip.id]);
+  return (
+    <Section title="Transition">
+      <NumberField label="Dissolve frames" value={frames} step={1} min={1} onChange={(v) => setFrames(Math.max(1, Math.round(v)))} />
+      <button
+        type="button"
+        data-testid="inspector-cross-dissolve"
+        style={{ ...labelStyle, cursor: "pointer", background: "none", border: "none", padding: 0, color: theme.accent.primary, textAlign: "left" }}
+        onClick={() => {
+          const plan = planCrossDissolve(store.getSnapshot().timeline, clip.id, frames);
+          if (!plan.ok) return setMessage(plan.message);
+          store.dispatch(crossDissolveCommand(clip.id, frames));
+          setMessage(`Dissolves in over ${frames} frames (${(frames / fps).toFixed(2)} s).`);
+        }}
+      >
+        Cross-dissolve from previous clip
+      </button>
+      {message && (
+        <div data-testid="inspector-cross-dissolve-message" style={{ ...labelStyle, whiteSpace: "normal" }}>
+          {message}
+        </div>
+      )}
+    </Section>
   );
 }
 
