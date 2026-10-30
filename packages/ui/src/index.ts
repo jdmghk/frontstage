@@ -62,7 +62,7 @@ export type { ProjectActivityViewProps, ProjectActivityButtonProps } from "./edi
 export { createEditorHost } from "./editor/editor-host.js";
 export { ProductionStore, ensureFolderPath } from "./production/production-store.js";
 export { ProductionTab } from "./production/ProductionTab.js";
-export type { ProductionTabProps, ProductionLibrary } from "./production/ProductionTab.js";
+export type { ProductionTabProps, ProductionLibrary, StudioVeo } from "./production/ProductionTab.js";
 export { CharactersTab } from "./production/CharactersTab.js";
 export type { CharactersTabProps, CharactersLibrary } from "./production/CharactersTab.js";
 export { CharacterLibrary, createOpfsCharacterStorage, createMemoryCharacterStorage, isValidCharacterId } from "./production/character-library.js";

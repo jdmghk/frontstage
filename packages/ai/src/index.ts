@@ -151,3 +151,5 @@ export type { VoiceStudioDeps, VoiceStartResult } from "./studio/voice-studio.js
 export { VoiceStudio, chatterboxInput, CHATTERBOX_ENDPOINT, CHATTERBOX_MAX_CHARS } from "./studio/voice-studio.js";
 export type { SampledFrame } from "./studio/choreography-task.js";
 export { choreographyTask, choreoSampleFps, MAX_CHOREO_FRAMES } from "./studio/choreography-task.js";
+export type { VeoPlan, VeoStudioDeps } from "./studio/veo-studio.js";
+export { VeoStudio, VEO_REFERENCE_ENDPOINT, VEO_MAX_REFERENCES } from "./studio/veo-studio.js";

@@ -47,6 +47,13 @@ export interface ProductionTabProps {
   morphic?: StudioMorphic;
   writer?: StudioWriter;
   flowExport?: FlowExport;
+  veo?: StudioVeo;
+}
+
+/** Direct Veo 3.1 through fal (host-provided). plan() is free; generate() charges fal credits. */
+export interface StudioVeo {
+  plan(p: Production, scene: Scene, shot: Shot): { summary: string; estimateUsd: number } | { error: string };
+  generate(p: Production, scene: Scene, shot: Shot, opts: { name: string; folderId?: string }): Promise<{ placeholderId: string } | { error: string }>;
 }
 
 const noopSubscribe = () => () => {};
@@ -64,7 +71,7 @@ const MANUAL_STATUSES: { value: ShotStatus; label: string }[] = [
   { value: "needs-regen", label: "Needs regeneration" },
 ];
 
-export function ProductionTab({ production, library, store, morphic, writer, flowExport }: ProductionTabProps) {
+export function ProductionTab({ production, library, store, morphic, writer, flowExport, veo }: ProductionTabProps) {
   const p = useSyncExternalStore(production.subscribe.bind(production), () => production.getSnapshot());
   useSyncExternalStore(library.subscribe.bind(library), () => library.getSnapshot().entries);
   // Re-render on timeline edits so "Place" flips to "Replace" (and back if the clip is deleted).
@@ -127,6 +134,7 @@ export function ProductionTab({ production, library, store, morphic, writer, flo
             morphic={morphic}
             writer={writer}
             flowExport={flowExport}
+            veo={veo}
           />
         ))}
       </div>
@@ -148,9 +156,10 @@ interface SceneCardProps {
   morphic?: StudioMorphic;
   writer?: StudioWriter;
   flowExport?: FlowExport;
+  veo?: StudioVeo;
 }
 
-function SceneCard({ p, scene, index, open, onToggle, expanded, onToggleShot, production, library, store, morphic, writer, flowExport }: SceneCardProps) {
+function SceneCard({ p, scene, index, open, onToggle, expanded, onToggleShot, production, library, store, morphic, writer, flowExport, veo }: SceneCardProps) {
   const set = (patch: Partial<Omit<Scene, "id" | "shots">>) => production.update((cur) => updateScene(cur, scene.id, patch));
   const tid = `scene-${index}`;
   const { busy, message, run } = useWriterAction(production, writer);
@@ -231,6 +240,7 @@ function SceneCard({ p, scene, index, open, onToggle, expanded, onToggleShot, pr
               morphic={morphic}
               writer={writer}
               flowExport={flowExport}
+              veo={veo}
             />
           ))}
           <div>
@@ -264,9 +274,10 @@ interface ShotCardProps {
   morphic?: StudioMorphic;
   writer?: StudioWriter;
   flowExport?: FlowExport;
+  veo?: StudioVeo;
 }
 
-function ShotCard({ p, scene, sceneIndex, shot, index, open, onToggle, production, library, store, morphic, writer, flowExport }: ShotCardProps) {
+function ShotCard({ p, scene, sceneIndex, shot, index, open, onToggle, production, library, store, morphic, writer, flowExport, veo }: ShotCardProps) {
   const writing = useWriterAction(production, writer);
   const fileInput = useRef<HTMLInputElement>(null);
   const [source, setSource] = useState<ShotProvider>("import");
@@ -299,6 +310,26 @@ function ShotCard({ p, scene, sceneIndex, shot, index, open, onToggle, productio
       }
       production.update((cur) => setShotStatus(attachTake(cur, shot.id, { mediaId: r.placeholderId, provider: "morphic" }), shot.id, "generating"));
       setMessage({ text: r.projectName ? `Sent to Morphic (project "${r.projectName}"). The take appears here when it's ready.` : "Sent to Morphic.", error: false });
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  // Veo 3.1 via fal: confirm the plan and estimated price first, then run it like a Morphic take.
+  const handleVeo = async () => {
+    if (!veo) return;
+    const cur = production.getSnapshot();
+    const plan = veo.plan(cur, scene, shot);
+    if ("error" in plan) return setMessage({ text: plan.error, error: true });
+    if (globalThis.confirm && !globalThis.confirm(`${plan.summary}.\nEstimated cost: $${plan.estimateUsd.toFixed(2)} (fal.ai). Generate?`)) return;
+    setGenerating(true);
+    setMessage(null);
+    try {
+      const name = `${numbered(index, shot.title, "Shot")} · Veo take ${shot.takes.length + 1}`;
+      const r = await veo.generate(cur, scene, shot, { name, folderId: shotFolder() });
+      if ("error" in r) return setMessage({ text: r.error, error: true });
+      production.update((c) => setShotStatus(attachTake(c, shot.id, { mediaId: r.placeholderId, provider: "fal-veo" }), shot.id, "generating"));
+      setMessage({ text: "Sent to Veo 3.1 on fal.ai. The take appears here when it's ready.", error: false });
     } finally {
       setGenerating(false);
     }
@@ -539,6 +570,17 @@ function ShotCard({ p, scene, sceneIndex, shot, index, open, onToggle, productio
                 title="Generate a new take in Morphic from this shot's prompt, using the cast's approved designs as references"
               >
                 {generating ? "Sending…" : "Generate in Morphic"}
+              </Button>
+            )}
+            {veo && (
+              <Button
+                size="small"
+                disabled={generating || shot.status === "generating"}
+                testid={`${tid}-veo`}
+                onClick={() => void handleVeo()}
+                title="Google's Veo 3.1 (the model behind Flow) via your fal.ai key, with the cast's designs as references. Shows the price first."
+              >
+                Veo 3.1 (fal)…
               </Button>
             )}
             {store && (

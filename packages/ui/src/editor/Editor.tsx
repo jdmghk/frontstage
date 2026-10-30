@@ -8,6 +8,7 @@ import type { KeyConfig, FalKeyConfig, McpSettings, RelayConfig, ClaudeSettings 
 import type { FlowExport, StudioWriter } from "../production/writer-ui.js";
 import type { StudioVoice } from "../production/VoiceTab.js";
 import type { FrameSampler } from "../production/ChoreoTab.js";
+import type { StudioVeo } from "../production/ProductionTab.js";
 import type { SkillsPaneProps } from "../skills/SkillsPane.js";
 import { ProjectActivityButton } from "./ProjectActivityView.js";
 import {
@@ -137,6 +138,8 @@ export interface EditorProps {
   voice?: StudioVoice;
   // Frame sampling for choreography analysis (desktop ffmpeg). Omitted -> analysis hidden.
   sampleFrames?: FrameSampler;
+  // Direct Veo 3.1 via fal for shots. Omitted -> hidden.
+  veo?: StudioVeo;
 }
 
 interface DiscardDialogState {
@@ -145,7 +148,7 @@ interface DiscardDialogState {
 
 export type RunProjectCommand = (fn: () => Promise<unknown>) => void;
 
-export function Editor({ store, media, library, session, nativeFileMenu, exportGateway, interopExport, engineRef, onReady, agent, getGenerationLog, indexing, relayAuth, waveformCache: waveformCacheProp, production, characterLibrary, morphic, writer, flowExport, voice, sampleFrames }: EditorProps) {
+export function Editor({ store, media, library, session, nativeFileMenu, exportGateway, interopExport, engineRef, onReady, agent, getGenerationLog, indexing, relayAuth, waveformCache: waveformCacheProp, production, characterLibrary, morphic, writer, flowExport, voice, sampleFrames, veo }: EditorProps) {
   const dragController = useMemo(() => new MediaDragController(), []);
   const ownedWaveformCache = useMemo(() => new WaveformCache(), []);
   const waveformCache = waveformCacheProp ?? ownedWaveformCache;
@@ -583,6 +586,7 @@ export function Editor({ store, media, library, session, nativeFileMenu, exportG
             flowExport={flowExport}
             voice={voice}
             sampleFrames={sampleFrames}
+            veo={veo}
             onItemPointerDown={(entry, e) => {
               e.preventDefault();
               dragController.start(entry, e.clientX, e.clientY, e.metaKey || e.ctrlKey);

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { EditorStore, defaultTimeline, findShot, upsertCharacter } from "@frontstage/core";
-import { ProductionTab } from "../src/production/ProductionTab.js";
+import { ProductionTab, type StudioVeo } from "../src/production/ProductionTab.js";
 import { CharactersTab } from "../src/production/CharactersTab.js";
 import { ProductionStore } from "../src/production/production-store.js";
 import { CharacterLibrary, createMemoryCharacterStorage } from "../src/production/character-library.js";
@@ -323,5 +323,32 @@ describe("Morphic trained characters", () => {
     expect(screen.getByTestId("character-0-morphic-linked").textContent).toContain("Kai v2");
     fireEvent.click(screen.getByTestId("character-0-morphic-unlink"));
     expect(production.getSnapshot().characters[0]!.morphicCharacterId).toBeUndefined();
+  });
+});
+
+describe("Veo 3.1 (fal)", () => {
+  test("shows the price first; cancel sends nothing, confirm attaches a generating Veo take", async () => {
+    const production = new ProductionStore();
+    const library = fakeProductionLibrary();
+    production.attachLibrary(library);
+    const sent: string[] = [];
+    const veo: StudioVeo = {
+      plan: () => ({ summary: "Veo 3.1 with 1 reference image, 8 s at 1080p with sound", estimateUsd: 3.2 }),
+      generate: async (_p, _s, _shot, opts) => (sent.push(opts.name), { placeholderId: library.addPlaceholder("v", "video").id }),
+    };
+    render(<ProductionTab production={production} library={library} veo={veo} />);
+    await addSceneWithShot();
+    fireEvent.change(screen.getByTestId("shot-0-0-prompt"), { target: { value: "a kick" } });
+    const asked: string[] = [];
+    const original = globalThis.confirm;
+    globalThis.confirm = ((m: string) => (asked.push(m), false)) as typeof confirm;
+    await act(async () => fireEvent.click(screen.getByTestId("shot-0-0-veo")));
+    expect(asked[0]).toContain("Estimated cost: $3.20");
+    expect(sent).toEqual([]);
+    globalThis.confirm = (() => true) as typeof confirm;
+    await act(async () => fireEvent.click(screen.getByTestId("shot-0-0-veo")));
+    globalThis.confirm = original;
+    expect(sent).toEqual(["01 Shot 1 · Veo take 1"]);
+    expect(production.getSnapshot().scenes[0]!.shots[0]!).toMatchObject({ status: "generating", takes: [{ provider: "fal-veo" }] });
   });
 });

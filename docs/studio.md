@@ -28,7 +28,8 @@ rail, no separate dashboard.
 | Morphic trained characters | **Implemented** (desktop) | Character card → **Link Morphic character…**; design generation then sends it as `edit_image` `character_id`. Morphic's `generate_video` takes no character id, so shots get the likeness through the approved designs made this way. Training happens in Morphic Studio |
 | Google Flow hand-off pack | **Implemented** (Phase 4, desktop) | Shot card → **Prepare for Flow…** writes `prompt.txt`, `shot.md` and up to 3 reference images to a folder. There is no public Flow API, so the clip comes back through **Import take…** |
 | Copy a shot's full prompt | **Implemented** | Shot card → **Copy prompt** (prompt + camera, framing, cast, continuity) |
-| Google Flow direct connection | Not supported | No public API exists |
+| Google Flow direct connection | Not supported | No public Flow API exists |
+| Veo 3.1 direct (the model behind Flow) | **Implemented** (desktop, fal key) | Shot card → **Veo 3.1 (fal)…**: with cast designs → Veo 3.1 reference-to-video (≤3 images, 8 s, 1080p, sound, ≈$3.20); without → Veo 3.1 Fast text-to-video. Shows the plan and price before sending; takes are recorded as `fal-veo` |
 | Claude: outline, logline, scenes | **Implemented** (Phase 4, desktop) | Production → Story → **Write outline**; scenes are only created when there are none |
 | Claude: characters from the story | **Implemented** | Story → **Suggest characters**; details you wrote are kept |
 | Claude: per-scene script, shot list, dialogue/voiceover, continuity | **Implemented** | Scene card buttons; each acts on that scene only. **Break into shots** keeps shots that have takes |
