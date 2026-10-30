@@ -88,8 +88,8 @@ Flow, download the clip, then on the shot choose **Google Flow (manual)** and **
 Speech comes from **Chatterbox Multilingual** (Resemble AI, MIT-licensed model) hosted on fal.ai, using
 the fal key from Settings → Generation, so no ElevenLabs subscription is needed. Why not self-hosted:
 running OpenVoice/Chatterbox locally needs a CUDA GPU (or slow CPU inference), several GB of model
-weights and a Python service to maintain; fal costs $0.025 per 1,000 characters instead (about $0.02 for
-a 10-minute script's dialogue). Resemble's open models add an inaudible "Perth" watermark to output.
+weights and a Python service to maintain; fal costs $0.025 per 1,000 characters instead (about $0.23 for
+ten minutes of continuous speech, roughly 9,000 characters, before retakes). Resemble's open models add an inaudible "Perth" watermark to output.
 
 1. **Voice → + Voice**: name it, choose a short clean recording of one speaker, its language, and
    confirm it's your voice or you have the speaker's permission (required; the confirmation, note and
