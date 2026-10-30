@@ -31,6 +31,8 @@ export const ShotSchema = z.object({
   prompt: z.string().default(""),
   promptState: ContentStateSchema.default("draft"),
   referenceMediaIds: z.array(z.string()).default([]),
+  /** A video whose movement the generator should follow (Morphic reference-to-video), e.g. a choreography reference. */
+  motionReferenceMediaId: z.string().optional(),
   provider: ShotProviderSchema.optional(),
   takes: z.array(TakeSchema).default([]),
   approvedTakeId: z.string().optional(),
@@ -407,13 +409,15 @@ export function dropMediaRefs(p: Production, mediaIds: ReadonlySet<string>): Pro
     shots: scene.shots.map((shot) => {
       const takes = shot.takes.filter((t) => keep(t.mediaId));
       const referenceMediaIds = shot.referenceMediaIds.filter(keep);
-      if (takes.length === shot.takes.length && referenceMediaIds.length === shot.referenceMediaIds.length) return shot;
+      const motionGone = shot.motionReferenceMediaId !== undefined && !keep(shot.motionReferenceMediaId);
+      if (takes.length === shot.takes.length && referenceMediaIds.length === shot.referenceMediaIds.length && !motionGone) return shot;
       changed = true;
       const approvedGone = shot.approvedTakeId !== undefined && !keep(shot.approvedTakeId);
       return {
         ...shot,
         takes,
         referenceMediaIds,
+        motionReferenceMediaId: motionGone ? undefined : shot.motionReferenceMediaId,
         approvedTakeId: approvedGone ? undefined : shot.approvedTakeId,
         status: approvedGone ? (takes.length ? "generated" as const : "draft" as const) : shot.status,
       };

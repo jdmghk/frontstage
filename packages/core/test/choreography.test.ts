@@ -68,3 +68,11 @@ describe("choreography", () => {
     expect(approveChoreographyToScene(withShot, id, "nope")).toEqual({ error: "Choose a scene." });
   });
 });
+
+test("approved choreography shots keep the reference video as their motion reference", () => {
+  let { p, id, sceneId } = setup();
+  p = setChoreoShots(p, id, [{ action: "jab" }]);
+  const r = approveChoreographyToScene(p, id, sceneId);
+  if ("error" in r) throw new Error(r.error);
+  expect(r.production.scenes[0]!.shots[0]!.motionReferenceMediaId).toBe("vid1");
+});

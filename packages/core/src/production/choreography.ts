@@ -113,6 +113,7 @@ export function approveChoreographyToScene(p: Production, id: string, sceneId: s
       characterIds,
       prompt: s.prompt,
       notes: s.continuity,
+      motionReferenceMediaId: c.referenceMediaId,
     }).production;
   }
   next = replaceChoreo(next, id, (x) => ({ ...x, state: "approved", sceneId }));

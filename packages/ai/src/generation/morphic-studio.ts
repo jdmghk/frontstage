@@ -111,6 +111,20 @@ export class MorphicStudio {
     return { assetIds, usedIds };
   }
 
+  private async uploadVideoReference(mediaId: string, projectId: string | undefined): Promise<string> {
+    const cached = this.uploaded.get(mediaId);
+    if (cached) return cached;
+    const entry = this.deps.entries().find((e) => e.id === mediaId);
+    if (!entry || entry.type !== "video") throw new Error("The motion reference video is missing from the library.");
+    const bytes = await this.deps.loadBytes(entry);
+    if (!bytes || bytes.length === 0) throw new Error(`The motion reference "${entry.name}" isn't available yet; save the project first.`);
+    if (bytes.length > 100 * 1024 * 1024) throw new Error("The motion reference is over Morphic's 100 MB upload limit; trim it first.");
+    const fileName = entry.name.replace(/[/\\\r\n]/g, "_").slice(0, 100) || "reference.mp4";
+    const assetId = await this.deps.bridge.uploadFile(bytes, mimeForEntry(entry), fileName, projectId);
+    this.uploaded.set(mediaId, assetId);
+    return assetId;
+  }
+
   /** Signed-in check, project, then reference uploads — everything that can fail before a placeholder exists. */
   private async prepare(refIds: string[], max: number): Promise<Prepared | { error: string }> {
     try {
@@ -166,12 +180,27 @@ export class MorphicStudio {
     const prep = await this.prepare(shotReferenceMediaIds(p, shot), MAX_VIDEO_REFS);
     if ("error" in prep) return prep;
     const { refs } = prep;
+    // Motion reference (e.g. a choreography reference video): sent as a reference video, which
+    // Morphic's reference-to-video models draw movement from. Not every model takes one; Morphic
+    // refuses with a message naming the ones that do.
+    let motionAssetId: string | undefined;
+    if (shot.motionReferenceMediaId) {
+      try {
+        motionAssetId = await this.uploadVideoReference(shot.motionReferenceMediaId, prep.project?.id);
+      } catch (e) {
+        return { error: e instanceof Error ? e.message : String(e) };
+      }
+    }
     const input: Record<string, unknown> = {
       prompt,
       aspect_ratio: "16:9",
       duration_seconds: Math.max(1, Math.min(60, Math.round(shot.durationSec))),
     };
     if (refs.assetIds.length > 0) input.reference_image_asset_ids = refs.assetIds;
+    if (motionAssetId) {
+      input.reference_video_asset_ids = [motionAssetId];
+      input.prompt = `${prompt}\nFollow the movement and timing of the reference video.`;
+    }
     return this.start("generate_video", input, prep.project, {
       type: "video",
       name: opts.name,

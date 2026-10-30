@@ -31,9 +31,9 @@ async function addReference(permission: boolean) {
 }
 
 describe("ChoreoTab", () => {
-  test("says plainly that it's analysis, not motion transfer", () => {
+  test("says plainly that motion guidance isn't an exact copy", () => {
     setup();
-    expect(screen.getByTestId("choreo-disclaimer").textContent).toContain("doesn't copy the reference's motion");
+    expect(screen.getByTestId("choreo-disclaimer").textContent).toContain("it isn't an exact copy");
   });
 
   test("a reference can't be added without the permission confirmation", async () => {

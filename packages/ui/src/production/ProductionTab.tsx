@@ -463,6 +463,17 @@ function ShotCard({ p, scene, sceneIndex, shot, index, open, onToggle, productio
             )}
           </div>
           <ActionNote message={writing.message} testid={`${tid}-write-message`} />
+          {shot.motionReferenceMediaId && (
+            <div style={{ ...rowStyle, fontSize: theme.fontSize.xs, color: theme.text.secondary }} data-testid={`${tid}-motion-ref`}>
+              <span style={{ flex: 1 }}>
+                Motion reference: {library.entry(shot.motionReferenceMediaId)?.name ?? "missing"}. Generate in Morphic asks the model to follow
+                its movement; how closely depends on the model.
+              </span>
+              <Button size="small" onClick={() => set({ motionReferenceMediaId: undefined })} testid={`${tid}-motion-ref-remove`}>
+                Remove
+              </Button>
+            </div>
+          )}
           <div style={rowStyle}>
             <FieldLabel>Status</FieldLabel>
             <Select

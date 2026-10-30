@@ -40,7 +40,7 @@ rail, no separate dashboard.
 | Fight choreography: reference import (permission required) | **Implemented** (Phase 5) | Media panel → **Choreo** tab → **+ Reference** |
 | Fight choreography: frame sampling + Claude shot plan | **Implemented** (desktop) | **Analyze** samples ≤20 frames with the bundled ffmpeg and asks Claude for shots: positions, action, camera, framing, transitions, impact times, continuity, prompt |
 | Fight choreography: edit, approve → scene shots | **Implemented** | Edit every field; **Approve → add shots** appends them to the chosen scene as draft shots |
-| Motion transfer from the reference | Not supported | The plan describes the moves; no current integrated generator copies the reference's motion |
+| Motion from the reference video | **Implemented** (desktop, Morphic) | Approved choreography shots keep the reference as a *motion reference*; **Generate in Morphic** sends it as `reference_video_asset_ids` (Morphic reference-to-video). It guides movement; it isn't exact motion transfer, and models that don't take reference video are refused by Morphic with the reason |
 | YouTube export presets (1080p, 4K, 16:9) | **Implemented** (Phase 6, desktop) | File → Export Video asks *Timeline size / YouTube 1080p / YouTube 4K*; YouTube presets encode H.264 High CRF 18 (preset slow), yuv420p, AAC 320 kbps 48 kHz, faststart. Disabled with a reason on non-16:9 timelines; warns when sources are smaller than the output |
 | Export presets in the web editor | Not yet | The web encoder is fixed H.264 Baseline at 5 Mbps; 4K isn't possible there |
 | Per-track volume | **Implemented** | Audio track header dB field (-60…+12), on top of each clip's volume; applies to preview and export; undoable |
@@ -125,8 +125,9 @@ A cloned voice resembles the reference but isn't identical; expressiveness and p
 5. Choose a scene and **Approve → add shots**: each planned shot becomes a draft shot in that scene,
    with matching cast linked; generate them from the Production tab like any other shot.
 
-This is analysis, not motion transfer: generators get a precise description and the cast's
-references, and the result will differ from the reference footage.
+Approved shots also carry the reference video as a motion reference for **Generate in Morphic**
+(reference-to-video). That guides the movement; it isn't an exact copy, so results will differ from
+the reference footage.
 
 ## Finishing and export
 

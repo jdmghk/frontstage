@@ -243,8 +243,9 @@ export function ChoreoTab({ production, library, writer, sampleFrames }: ChoreoT
       </div>
       <div style={scrollColumnStyle}>
         <div style={note()} data-testid="choreo-disclaimer">
-          This analyzes a reference fight into a shot plan: positions, moves, camera and hit timing, written out for a
-          video generator to attempt. It doesn't copy the reference's motion; generated fights will differ from it.
+          This analyzes a reference fight into a shot plan: positions, moves, camera and hit timing. Approved shots also
+          keep the reference as a motion reference, which Generate in Morphic sends to models that accept reference
+          video. That guides movement; it isn't an exact copy, and results will differ from the reference.
         </div>
         {adding && <NewReferenceForm production={production} library={library} onDone={() => setAdding(false)} />}
         {p.choreographies.map((c, i) => (

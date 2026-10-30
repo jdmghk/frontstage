@@ -292,3 +292,25 @@ describe("Morphic trained characters", () => {
     expect(starts[0]!.input).not.toHaveProperty("image_asset_ids");
   });
 });
+
+describe("motion reference", () => {
+  test("a shot's motion reference video goes out as reference_video_asset_ids", async () => {
+    let p: Production = emptyProduction();
+    const s = addScene(p, { title: "Fight" });
+    p = addShot(s.production, s.sceneId, { prompt: "Kai slips a hook", motionReferenceMediaId: "ref-vid" }).production;
+    const scene = p.scenes[0]!;
+    const { bridge, uploads } = fakeBridge({ list_projects: [ok({ projects: [PROJECT] })] });
+    const starts: StartJobArgs[] = [];
+    const studio = new MorphicStudio({
+      bridge,
+      generation: { addPlaceholder: () => {}, startJob: async (a) => (starts.push(a), { jobId: "j" }) },
+      entries: () => [{ id: "ref-vid", name: "fight.mp4", type: "video", duration: 4, source: { kind: "project", relativePath: "media/fight.mp4" } }],
+      loadBytes: async () => new Uint8Array([1]),
+      newId: () => "ph",
+    });
+    await studio.generateShotTake(p, scene, scene.shots[0]!, { name: "n" });
+    expect(uploads).toEqual(["fight.mp4"]);
+    expect(starts[0]!.input).toMatchObject({ reference_video_asset_ids: ["019a0000-0000-7000-8000-000000000101"] });
+    expect(String(starts[0]!.input.prompt)).toContain("Follow the movement and timing of the reference video.");
+  });
+});
