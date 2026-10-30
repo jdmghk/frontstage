@@ -11,6 +11,11 @@ import { FolderTile, isMediaDrag, type MediaDragPayload } from "./FolderTile.js"
 import { MediaBreadcrumbs } from "./MediaBreadcrumbs.js";
 import { MatteSheet } from "./MatteSheet.js";
 import type { IndexStatus, MissingModel } from "./media-indexing.js";
+import { ProductionTab } from "../production/ProductionTab.js";
+import { CharactersTab, type CharactersLibrary } from "../production/CharactersTab.js";
+import type { ProductionStore } from "../production/production-store.js";
+import type { CharacterLibrary } from "../production/character-library.js";
+import type { StudioMorphic } from "../production/morphic.js";
 
 const MODEL_LABEL: Record<MissingModel, string> = { embedding: "Search model", transcription: "Transcription model" };
 // Downloaded in this fixed order regardless of Set iteration order — embedding is the older/
@@ -51,6 +56,7 @@ interface MediaLibraryLike {
   // Backs the "New Matte…" header action (M13A T1) — the SAME fromBytes-backed import path
   // import_media uses. Optional: omitted -> the action is hidden rather than erroring.
   importBytes?(bytes: Uint8Array, mimeType: string, name?: string, folderId?: string): Promise<{ assetId: string }>;
+  readEntryBytes?(id: string): Promise<Uint8Array>;
 }
 
 export interface MediaPanelProps {
@@ -64,15 +70,38 @@ export interface MediaPanelProps {
   // toward the timeline, per onItemPointerDown), driven by the host (Editor). Only relevant
   // while that gesture is active — drives FolderTile/MediaBreadcrumbs hover styling for it.
   dragOverFolderId?: string | null;
+  // Scenes/shots/characters (production.json). Omitted -> the Production and Characters tabs are hidden.
+  production?: ProductionStore;
+  characterLibrary?: CharacterLibrary;
+  morphic?: StudioMorphic;
 }
 
-type PanelTab = "media" | "captions";
+type PanelTab = "media" | "captions" | "production" | "characters";
 
 // Swift's PanelTab has a third case (.music) — deliberately unported here (recorded deviation).
 const MEDIA_PANEL_TABS: { id: PanelTab; label: string; icon: IconName }[] = [
   { id: "media", label: "Media", icon: "folder" },
   { id: "captions", label: "Captions", icon: "captions" },
+  { id: "production", label: "Production", icon: "clapper" },
+  { id: "characters", label: "Characters", icon: "person" },
 ];
+const PRODUCTION_TABS: ReadonlySet<PanelTab> = new Set(["production", "characters"]);
+
+// Characters need byte read/write for the cross-project library; hosts whose library lacks them
+// still get the tab, and only the library actions fail with a clear message.
+function asCharactersLibrary(library: MediaLibraryLike): CharactersLibrary {
+  return {
+    getSnapshot: () => library.getSnapshot(),
+    subscribe: (cb) => library.subscribe(cb),
+    thumbnail: (id) => library.thumbnail(id),
+    entry: (id) => library.entry(id),
+    importFiles: (files, folderId) => library.importFiles(files, folderId),
+    createFolder: (name, parent) => library.createFolder(name, parent),
+    readEntryBytes: (id) => (library.readEntryBytes ? library.readEntryBytes(id) : Promise.reject(new Error("reading media bytes is not supported here"))),
+    importBytes: (bytes, mime, name, folderId) =>
+      library.importBytes ? library.importBytes(bytes, mime, name, folderId) : Promise.reject(new Error("importing bytes is not supported here")),
+  };
+}
 // Mirrors --icon-size-sm (18px) — Icon's size prop sets raw SVG width/height, not a CSS var.
 const TAB_ICON_SIZE = 18;
 // Mirrors --font-xs (10px) — MediaTab.swift's toolbarButton/toolbarMenuIcon glyphs are sized via
@@ -80,7 +109,8 @@ const TAB_ICON_SIZE = 18;
 const HEADER_ICON_SIZE = 10;
 const OVERFLOW_ICON_FRAME = "sm" as const;
 
-export function MediaPanel({ library, onItemPointerDown, store, executor, transcription, indexing, dragOverFolderId }: MediaPanelProps) {
+export function MediaPanel({ library, onItemPointerDown, store, executor, transcription, indexing, dragOverFolderId, production, characterLibrary, morphic }: MediaPanelProps) {
+  const panelTabs = production ? MEDIA_PANEL_TABS : MEDIA_PANEL_TABS.filter((t) => !PRODUCTION_TABS.has(t.id));
   const indexStatus = useSyncExternalStore(
     indexing?.subscribe ?? noopSubscribe,
     () => indexing?.getStatus() ?? IDLE_STATUS,
@@ -343,7 +373,7 @@ export function MediaPanel({ library, onItemPointerDown, store, executor, transc
           boxSizing: "border-box",
         }}
       >
-        {MEDIA_PANEL_TABS.map((t) => {
+        {panelTabs.map((t) => {
           const selected = tab === t.id;
           return (
             <div
@@ -380,7 +410,7 @@ export function MediaPanel({ library, onItemPointerDown, store, executor, transc
             </div>
           );
         })}
-        {MEDIA_PANEL_TABS.map((t, i) => (
+        {panelTabs.map((t, i) => (
           <div
             key={`hover-${t.id}`}
             style={{
@@ -590,6 +620,10 @@ export function MediaPanel({ library, onItemPointerDown, store, executor, transc
             ))}
           </div>
         </>
+      ) : tab === "production" && production ? (
+        <ProductionTab production={production} library={library} store={store} morphic={morphic} />
+      ) : tab === "characters" && production ? (
+        <CharactersTab production={production} library={asCharactersLibrary(library)} characterLibrary={characterLibrary} morphic={morphic} />
       ) : store && executor && transcription ? (
         <CaptionsTab store={store} executor={executor} transcription={transcription} library={library} />
       ) : (

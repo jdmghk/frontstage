@@ -1,6 +1,7 @@
 import type { GenerationLog } from "../generation-log.js";
 import { emptyGenerationLog } from "../generation-log.js";
 import type { MediaManifest } from "../media.js";
+import { emptyProduction, ProductionSchema, type Production } from "../production/production.js";
 import { emptyMediaManifest } from "../media.js";
 import type { ProjectFile, TimelineViewState } from "../project-file.js";
 import { activeTimeline, wrapLegacyTimeline } from "../project-file.js";
@@ -17,6 +18,8 @@ export interface ProjectDoc {
   viewStates?: Record<string, TimelineViewState>;
   manifest: MediaManifest;
   generationLog: GenerationLog;
+  /** Scenes/shots/characters; absent on projects that never used the production tools. */
+  production?: Production;
 }
 
 export interface DecodedProjectFiles extends ProjectDoc {
@@ -28,6 +31,7 @@ export const PROJECT_FILES = {
   timeline: "project.json",
   manifest: "media.json",
   generationLog: "generation-log.json",
+  production: "production.json",
 } as const;
 
 function projectFileFromDoc(doc: ProjectDoc): ProjectFile {
@@ -48,17 +52,20 @@ function projectFileFromDoc(doc: ProjectDoc): ProjectFile {
 
 export function encodeProjectFiles(doc: ProjectDoc): Record<string, string> {
   const file = projectFileFromDoc(doc);
-  return {
+  const files: Record<string, string> = {
     [PROJECT_FILES.timeline]: JSON.stringify({ schemaVersion: CURRENT_SCHEMA_VERSION, ...file }),
     [PROJECT_FILES.manifest]: JSON.stringify(doc.manifest),
     [PROJECT_FILES.generationLog]: JSON.stringify(doc.generationLog),
   };
+  if (doc.production) files[PROJECT_FILES.production] = JSON.stringify(doc.production);
+  return files;
 }
 
 export function decodeProjectFiles(files: {
   timeline: string;
   manifest?: string;
   generationLog?: string;
+  production?: string;
 }): DecodedProjectFiles {
   const migrated = migrateProjectJson(JSON.parse(files.timeline));
   const file = parseProjectFile(migrated);
@@ -90,6 +97,7 @@ export function decodeProjectFiles(files: {
   return {
     timeline,
     timelines: file.timelines,
+    production: decodeProduction(files.production),
     activeTimelineId: file.activeTimelineId,
     openTimelineIds: file.openTimelineIds,
     viewStates: file.viewStates,
@@ -97,6 +105,16 @@ export function decodeProjectFiles(files: {
     generationLog,
     manifestUnreadable,
   };
+}
+
+/** Unlike media.json, a corrupt production.json throws: silently emptying it would lose the user's scripts on the next save. */
+function decodeProduction(text: string | undefined): Production {
+  if (text === undefined) return emptyProduction();
+  try {
+    return ProductionSchema.parse(JSON.parse(text));
+  } catch (e) {
+    throw new Error(`${PROJECT_FILES.production} is unreadable: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 function parseProjectFile(migrated: Record<string, unknown>): ProjectFile {

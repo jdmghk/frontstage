@@ -32,10 +32,12 @@ export async function readProject(store: ProjectStore): Promise<ReadProjectResul
   if (timeline === null) throw new Error(`readProject: missing ${PROJECT_FILES.timeline}`);
   const manifest = await store.readText(PROJECT_FILES.manifest);
   const generationLog = await store.readText(PROJECT_FILES.generationLog);
+  const production = await store.readText(PROJECT_FILES.production);
   const decoded = decodeProjectFiles({
     timeline,
     manifest: manifest ?? undefined,
     generationLog: generationLog ?? undefined,
+    production: production ?? undefined,
   });
   return { ...decoded, rawManifestText: manifest };
 }

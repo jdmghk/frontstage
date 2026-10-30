@@ -85,6 +85,22 @@ contextBridge.exposeInMainWorld("desktopSkills", {
   cacheWrite: (s) => ipcRenderer.invoke("skills:cacheWrite", s),
 });
 
+contextBridge.exposeInMainWorld("desktopCharacters", {
+  listIds: () => ipcRenderer.invoke("characters:listIds"),
+  readFile: (id, name) => ipcRenderer.invoke("characters:readFile", id, name),
+  writeFile: (id, name, bytes) => ipcRenderer.invoke("characters:writeFile", id, name, bytes),
+  remove: (id) => ipcRenderer.invoke("characters:remove", id),
+});
+
+contextBridge.exposeInMainWorld("desktopMorphic", {
+  status: () => ipcRenderer.invoke("morphic:status"),
+  signIn: () => ipcRenderer.invoke("morphic:signIn"),
+  signOut: () => ipcRenderer.invoke("morphic:signOut"),
+  callTool: (name, args) => ipcRenderer.invoke("morphic:callTool", { name, args }),
+  upload: (bytes, contentType, fileName, projectId) => ipcRenderer.invoke("morphic:upload", { bytes, contentType, fileName, projectId }),
+  download: (url) => ipcRenderer.invoke("morphic:download", { url }),
+});
+
 contextBridge.exposeInMainWorld("desktopProject", {
   pickOpen: () => ipcRenderer.invoke("project:pickOpen"),
   pickSaveAs: (n) => ipcRenderer.invoke("project:pickSaveAs", n),

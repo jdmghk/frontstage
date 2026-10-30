@@ -119,3 +119,15 @@ export type { SkillStorage } from "./skills/skill-store.js";
 export { SkillStore } from "./skills/skill-store.js";
 export type { SkillCatalogEntry, SkillCatalogDeps } from "./skills/skill-catalog.js";
 export { SkillCatalog } from "./skills/skill-catalog.js";
+export type { MorphicBridge, MorphicGenTool, MorphicToolResult } from "./generation/morphic-gateway.js";
+export {
+  MorphicGateway,
+  RoutingGenGateway,
+  MORPHIC_ENDPOINT_PREFIX,
+  morphicEndpoint,
+  isMorphicEndpoint,
+  parseStartResult,
+  mapWaitResult,
+} from "./generation/morphic-gateway.js";
+export type { MorphicStudioDeps, MorphicStartResult } from "./generation/morphic-studio.js";
+export { MorphicStudio, shotPrompt, characterDesignPrompt, characterBrief } from "./generation/morphic-studio.js";

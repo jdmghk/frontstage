@@ -10,6 +10,9 @@ export type IconName =
   | "x"
   | "chevron-right"
   | "chevron-down"
+  | "chevron-up"
+  | "clapper"
+  | "person"
   | "play"
   | "pause"
   | "step-back"
@@ -106,6 +109,21 @@ const PATHS: Record<IconName, React.ReactNode> = {
   ),
   "chevron-right": <path d="M9 6l6 6-6 6" />,
   "chevron-down": <path d="M6 9l6 6 6-6" />,
+  "chevron-up": <path d="M6 15l6-6 6 6" />,
+  clapper: (
+    <>
+      <rect x="3" y="9" width="18" height="11" rx="2" />
+      <path d="M3 9l2-4 16 0-2 4" />
+      <line x1="9" y1="5" x2="7" y2="9" />
+      <line x1="15" y1="5" x2="13" y2="9" />
+    </>
+  ),
+  person: (
+    <>
+      <circle cx="12" cy="8" r="3.5" />
+      <path d="M5 20c0-3.9 3.1-6.5 7-6.5s7 2.6 7 6.5" />
+    </>
+  ),
   play: <path d="M8 5.5l11 6.5-11 6.5z" fill="currentColor" stroke="none" />,
   // "pause.fill" — filled bars, matching play's fill treatment (PreviewContainerView.transportButton).
   pause: (

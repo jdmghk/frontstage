@@ -3,6 +3,7 @@ import type { MediaManifest, MediaGateway } from "@frontstage/core";
 import type { ProjectHost, ProjectGateway, BoundProject } from "@frontstage/core";
 import type { GenerationLogEntry } from "@frontstage/core";
 import { emptyGenerationLog, resetStuckGenerations } from "@frontstage/core";
+import { ProductionStore } from "../production/production-store.js";
 
 export interface EditorMediaHost {
   getManifest(): MediaManifest;
@@ -23,6 +24,7 @@ export interface EditorHostResult {
   wrappedGateway: WrappedGateway;
   appendGenerationLog: (entry: GenerationLogEntry) => void;
   getGenerationLog: () => GenerationLogEntry[];
+  production: ProductionStore;
 }
 
 export function createEditorHost(
@@ -34,6 +36,7 @@ export function createEditorHost(
   // True after bind(); consumed (reset false) on loadDoc so a new-doc loadDoc (no preceding bind) passes null.
   let _bindPending = false;
   let _genLog: GenerationLogEntry[] = [];
+  const production = new ProductionStore();
 
   const wrappedGateway: WrappedGateway = {
     get _lastMedia() {
@@ -82,6 +85,9 @@ export function createEditorHost(
     getGenerationLog() {
       return { version: 1 as const, entries: [..._genLog] };
     },
+    getProduction() {
+      return production.getSnapshot();
+    },
     loadDoc(doc) {
       // No preceding bind means new-doc path: clear stale gateway so empty manifest has no stale store.
       if (!_bindPending) _lastMedia = null;
@@ -101,6 +107,7 @@ export function createEditorHost(
       const manifest = { ...doc.manifest, entries: resetStuckGenerations(doc.manifest.entries) };
       mediaHost.loadManifest(manifest, _lastMedia);
       mediaHost.setGateway(_lastMedia);
+      production.load(doc.production);
     },
     pendingMedia() {
       return mediaHost.pendingMedia();
@@ -119,5 +126,5 @@ export function createEditorHost(
     return host.getGenerationLog().entries;
   }
 
-  return { host, wrappedGateway, appendGenerationLog, getGenerationLog };
+  return { host, wrappedGateway, appendGenerationLog, getGenerationLog, production };
 }

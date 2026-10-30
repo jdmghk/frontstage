@@ -5,6 +5,7 @@ import type { GenerationLogEntry } from "@frontstage/core";
 import type { PlaybackEngine } from "@frontstage/engine";
 import { renderSpanToMp4 } from "@frontstage/engine";
 import "@frontstage/ui/theme/tokens.css";
+import { CharacterLibrary, createOpfsCharacterStorage, type ProductionStore } from "@frontstage/ui";
 import { restoreLayout, createEditorHost, localProjectStore, measureCaptionWidthFrac, MediaIndexingService, IndexingStatusRelay, createDomFrameTap, createDomOpenMedia, renderMattePng, encodeFrameJPEG, readConfirmThreshold, writeConfirmThreshold } from "@frontstage/ui";
 import type { KeyConfig, FalKeyConfig, RelayConfig, GenerationFacade, MediaIndexingHost, MediaIndexingFacade } from "@frontstage/ui";
 import { AgentSession, ChatSessionStore, ToolExecutor, buildCatalog, ImageGenerator, GenerationService, listLLMModels, listImageModels, defaultLLMModel, defaultImageModel, makeEntryUrl, TranscriptionService, EmbeddingService, createTransformersPipelines, LocalAsrService, createTransformersAsrPipelines, SkillStore, SkillCatalog, skillsSection } from "@frontstage/ai";
@@ -46,9 +47,11 @@ interface FrontstageAppProps {
   indexing: MediaIndexingFacade;
   skillStore: SkillStore;
   skillCatalog: SkillCatalog;
+  production: ProductionStore;
+  characterLibrary: CharacterLibrary;
 }
 
-function FrontstageApp({ store, session, library, exportGateway, interopExport, agentSession, imageGenerator, sessionStore, mentionItems, aiProxyUrl, engineRef, getGenerationLog, genGateway, generationFacade, executor, transcriptionFacade, indexing, skillStore, skillCatalog }: FrontstageAppProps) {
+function FrontstageApp({ store, session, library, exportGateway, interopExport, agentSession, imageGenerator, sessionStore, mentionItems, aiProxyUrl, engineRef, getGenerationLog, genGateway, generationFacade, executor, transcriptionFacade, indexing, skillStore, skillCatalog, production, characterLibrary }: FrontstageAppProps) {
   const [agentModel, setAgentModel] = useState(() => localStorage.getItem("frontstage.agent.model") ?? defaultLLMModel());
   const [imageModel, setImageModel] = useState(() => localStorage.getItem("frontstage.image.model") ?? defaultImageModel());
   const [proxyUrl, setProxyUrl] = useState(() => localStorage.getItem("frontstage.ai.proxyUrl") ?? aiProxyUrl);
@@ -146,6 +149,8 @@ function FrontstageApp({ store, session, library, exportGateway, interopExport, 
       getGenerationLog={getGenerationLog}
       indexing={indexing}
       relayAuth={relayAuth}
+      production={production}
+      characterLibrary={characterLibrary}
       agent={{
         session: agentSession,
         model: agentModel,
@@ -186,7 +191,8 @@ async function bootstrap() {
     | ((opts?: { mode?: "read" | "readwrite" }) => Promise<FileSystemDirectoryHandle | null>)
     | undefined;
   const gateway = new WebGateway(pickDirectory ? { pickDirectory } : undefined);
-  const { host, wrappedGateway, appendGenerationLog, getGenerationLog } = createEditorHost(store, library, gateway);
+  const { host, wrappedGateway, appendGenerationLog, getGenerationLog, production } = createEditorHost(store, library, gateway);
+  const characterLibrary = new CharacterLibrary(createOpfsCharacterStorage());
   const session = new ProjectSession(host, wrappedGateway);
 
   // Construct WebAiGateway; proxy URL from test-seam or env.
@@ -498,6 +504,8 @@ async function bootstrap() {
         transcriptionFacade={transcriptionFacade}
         indexing={indexingFacade}
         skillStore={skillStore}
+        production={production}
+        characterLibrary={characterLibrary}
         skillCatalog={skillCatalog}
       />
     </StrictMode>,

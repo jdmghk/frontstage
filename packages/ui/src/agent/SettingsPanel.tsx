@@ -5,6 +5,7 @@ import { Button, IconButton, TextInput, Checkbox, Icon, type IconName } from "..
 import { ModelPicker } from "./ModelPicker.js";
 import { DEFAULT_CONFIRM_THRESHOLD } from "./generation-settings.js";
 import { SkillsPane, type SkillsPaneProps } from "../skills/SkillsPane.js";
+import { MorphicAccountSection, type MorphicAccount } from "../production/morphic.js";
 
 // Icon-in-capsule sizing — same family as GenerationPanel's close/submit glyphs (M16E T2).
 const CLOSE_ICON_SIZE = 14;
@@ -86,6 +87,8 @@ export interface SettingsPanelProps {
   mcp?: McpSettings;
   skills?: SkillsPaneProps;
   relay?: RelayConfig;
+  // Desktop only: Morphic sign-in for the Production/Characters tabs. Omitted -> section hidden.
+  morphic?: MorphicAccount;
 }
 
 function KeychainConfig({
@@ -401,6 +404,7 @@ export function SettingsPanel({
   mcp,
   skills,
   relay,
+  morphic,
 }: SettingsPanelProps) {
   const [tab, setTab] = useState<SettingsTab>("agent");
 
@@ -534,6 +538,12 @@ export function SettingsPanel({
                   ) : (
                     <FalProxyInfo cfg={falKeyConfig} />
                   )}
+                </section>
+              )}
+              {morphic && (
+                <section data-testid="settings-morphic" style={{ display: "flex", flexDirection: "column", gap: theme.spacing.sm }}>
+                  <span style={sectionHeaderStyle}>Morphic</span>
+                  <MorphicAccountSection account={morphic} />
                 </section>
               )}
               <ModelPicker

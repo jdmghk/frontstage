@@ -29,6 +29,9 @@ import { TimelinePanel } from "../timeline/TimelinePanel.js";
 import { TimelineTabs } from "../timeline/TimelineTabs.js";
 import { Toolbar } from "../toolbar/Toolbar.js";
 import { MediaPanel } from "../media/MediaPanel.js";
+import type { ProductionStore } from "../production/production-store.js";
+import type { CharacterLibrary } from "../production/character-library.js";
+import type { StudioMorphic } from "../production/morphic.js";
 import type { CaptionsExecutor, CaptionsTranscriptionFacade } from "../media/CaptionsTab.js";
 import type { MediaIndexingFacade } from "../media/MediaPanel.js";
 import { MediaDragController } from "../media/media-drag.js";
@@ -50,6 +53,8 @@ import { ExportProgress } from "./ExportProgress.js";
 import type { ExportGateway } from "./export-gateway.js";
 import { handleEditorKeydown } from "./editor-shortcuts.js";
 
+const noopSubscribe = () => () => {};
+
 // Duck-typed library interface covering what MediaPanel, InspectorPanel, and drag-drop each need.
 export interface EditorLibrary {
   getSnapshot(): { entries: MediaManifestEntry[]; folders: MediaFolder[] };
@@ -69,6 +74,7 @@ export interface EditorLibrary {
   bytesFor?(entry: MediaManifestEntry): Uint8Array | undefined;
   readMedia?(relativePath: string): Promise<Uint8Array>;
   readEntryBytes?(id: string): Promise<Uint8Array>;
+  importBytes?(bytes: Uint8Array, mimeType: string, name?: string, folderId?: string): Promise<{ assetId: string }>;
 }
 
 export interface EditorProps {
@@ -115,6 +121,11 @@ export interface EditorProps {
   };
   /** Host-owned cache (desktop: same instance `extract_audio` ingests into). */
   waveformCache?: WaveformCache;
+  // Scenes/shots/characters for the Production and Characters media-panel tabs (from createEditorHost).
+  production?: ProductionStore;
+  characterLibrary?: CharacterLibrary;
+  // Morphic generation for shots and character designs (desktop). Omitted -> those actions are hidden.
+  morphic?: StudioMorphic;
 }
 
 interface DiscardDialogState {
@@ -123,7 +134,7 @@ interface DiscardDialogState {
 
 export type RunProjectCommand = (fn: () => Promise<unknown>) => void;
 
-export function Editor({ store, media, library, session, nativeFileMenu, exportGateway, interopExport, engineRef, onReady, agent, getGenerationLog, indexing, relayAuth, waveformCache: waveformCacheProp }: EditorProps) {
+export function Editor({ store, media, library, session, nativeFileMenu, exportGateway, interopExport, engineRef, onReady, agent, getGenerationLog, indexing, relayAuth, waveformCache: waveformCacheProp, production, characterLibrary, morphic }: EditorProps) {
   const dragController = useMemo(() => new MediaDragController(), []);
   const ownedWaveformCache = useMemo(() => new WaveformCache(), []);
   const waveformCache = waveformCacheProp ?? ownedWaveformCache;
@@ -134,6 +145,9 @@ export function Editor({ store, media, library, session, nativeFileMenu, exportG
     ingest();
     return library.subscribe(ingest);
   }, [library, waveformCache]);
+  useEffect(() => production?.attachLibrary(library), [production, library]);
+  // Production edits mark the project dirty, so re-render to refresh the unsaved indicator.
+  useSyncExternalStore(production ? production.subscribe.bind(production) : noopSubscribe, () => production?.getSnapshot());
 
   const [agentVisible, setAgentVisible] = useState(() => {
     try { return localStorage.getItem("frontstage.agent.visible") === "1"; } catch { return false; }
@@ -551,6 +565,9 @@ export function Editor({ store, media, library, session, nativeFileMenu, exportG
             transcription={agent?.transcription}
             indexing={indexing}
             dragOverFolderId={dragSnap?.hoverFolderId}
+            production={production}
+            characterLibrary={characterLibrary}
+            morphic={morphic}
             onItemPointerDown={(entry, e) => {
               e.preventDefault();
               dragController.start(entry, e.clientX, e.clientY, e.metaKey || e.ctrlKey);
@@ -610,6 +627,7 @@ export function Editor({ store, media, library, session, nativeFileMenu, exportG
           mcp={agent.settings.mcp}
           skills={agent.settings.skills}
           relay={agent.settings.relay}
+          morphic={morphic?.account}
         />
       )}
 

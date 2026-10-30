@@ -12,6 +12,7 @@ import { emptyMediaManifest } from "../media.js";
 import type { GenerationLog } from "../generation-log.js";
 import { emptyGenerationLog } from "../generation-log.js";
 import type { ProjectRef } from "./gateway.js";
+import { addScene, emptyProduction, type Production } from "../production/production.js";
 
 class FakeHost implements ProjectHost {
   timeline: Timeline;
@@ -451,5 +452,39 @@ describe("ProjectSession", () => {
       const emptied = await bound.store.readText(PROJECT_FILES.manifest);
       expect(JSON.parse(emptied!).entries).toEqual([]);
     });
+  });
+});
+
+class ProductionHost extends FakeHost {
+  production: Production = emptyProduction();
+  getProduction(): Production {
+    return this.production;
+  }
+  override loadDoc(doc: ProjectDoc): void {
+    super.loadDoc(doc);
+    this.production = doc.production ?? emptyProduction();
+  }
+}
+
+describe("ProjectSession — production", () => {
+  it("a production edit makes the session dirty and saving clears it", async () => {
+    const host = new ProductionHost();
+    const session = new ProjectSession(host, new InMemoryProjectGateway());
+    host.production = addScene(host.production, { title: "Opening" }).production;
+    expect(session.isDirty()).toBe(true);
+    expect(await session.saveAs()).toBe(true);
+    expect(session.isDirty()).toBe(false);
+  });
+
+  it("saved scenes come back on open", async () => {
+    let ref: ProjectRef | null = null;
+    const gw = new InMemoryProjectGateway({ saveAsFactory: (name) => (ref = { id: "p", name }) });
+    const host1 = new ProductionHost();
+    host1.production = addScene(host1.production, { title: "Fight" }).production;
+    await new ProjectSession(host1, gw).saveAs();
+
+    const host2 = new ProductionHost();
+    expect(await new ProjectSession(host2, gw).open(alwaysProceed, ref!)).toBe(true);
+    expect(host2.production.scenes.map((s) => s.title)).toEqual(["Fight"]);
   });
 });

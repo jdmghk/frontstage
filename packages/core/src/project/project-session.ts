@@ -1,6 +1,7 @@
 import type { GenerationLog } from "../generation-log.js";
 import { emptyGenerationLog } from "../generation-log.js";
 import type { MediaManifest } from "../media.js";
+import type { Production } from "../production/production.js";
 import type { Timeline } from "../timeline.js";
 import { defaultTimeline } from "../timeline.js";
 import { emptyMediaManifest } from "../media.js";
@@ -15,6 +16,7 @@ export interface ProjectHost {
   getOpenTimelineIds?(): string[];
   getManifest(): MediaManifest;
   getGenerationLog(): GenerationLog;
+  getProduction?(): Production;
   loadDoc(doc: ProjectDoc): void;
   pendingMedia(): Map<string, Uint8Array>;
   markMediaPersisted(relativePaths: string[]): void;
@@ -42,6 +44,7 @@ export class ProjectSession {
   private savedTimeline: Timeline;
   private savedTimelines: Timeline[] | undefined;
   private savedManifest: MediaManifest;
+  private savedProduction: Production | undefined;
   private listeners: Set<() => void> = new Set();
   // Set when the opened project's media.json existed but failed to decode, so saves preserve
   // the original bytes instead of clobbering them with an empty manifest. Cleared once a real
@@ -59,6 +62,7 @@ export class ProjectSession {
     this.savedTimeline = host.getTimeline();
     this.savedTimelines = host.getTimelines?.();
     this.savedManifest = host.getManifest();
+    this.savedProduction = host.getProduction?.();
   }
 
   // Returns a fresh object each call; callers using useSyncExternalStore must memoize/select fields.
@@ -76,14 +80,18 @@ export class ProjectSession {
     for (const cb of this.listeners) cb();
   }
 
-  // generationLog intentionally excluded from dirty — only timeline + manifest.
+  // generationLog intentionally excluded from dirty — only timeline + manifest + production.
   isDirty(): boolean {
     const timelines = this.host.getTimelines?.();
     const timelinesDirty =
       timelines !== undefined && this.savedTimelines !== undefined
         ? timelines !== this.savedTimelines
         : this.host.getTimeline() !== this.savedTimeline;
-    return timelinesDirty || this.host.getManifest() !== this.savedManifest;
+    return (
+      timelinesDirty ||
+      this.host.getManifest() !== this.savedManifest ||
+      this.host.getProduction?.() !== this.savedProduction
+    );
   }
 
   async newProject(confirm: ConfirmDiscard): Promise<boolean> {
@@ -176,6 +184,7 @@ export class ProjectSession {
         openTimelineIds: this.host.getOpenTimelineIds?.(),
         manifest,
         generationLog: this.host.getGenerationLog(),
+        production: this.host.getProduction?.(),
       },
       preserveText !== null ? { preserveManifestText: preserveText } : undefined
     );
@@ -202,5 +211,6 @@ export class ProjectSession {
     this.savedTimeline = this.host.getTimeline();
     this.savedTimelines = this.host.getTimelines?.();
     this.savedManifest = this.host.getManifest();
+    this.savedProduction = this.host.getProduction?.();
   }
 }

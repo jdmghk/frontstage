@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import { EditorStore, ProjectSession, defaultTimeline, SAMPLER_VERSION } from "@frontstage/core";
 import type { MediaManifestEntry } from "@frontstage/core";
 import "@frontstage/ui/theme/tokens.css";
+import { CharacterLibrary } from "@frontstage/ui";
+import { createDesktopCharacterStorage } from "./desktop-characters.js";
 import { Editor, MediaLibrary, createEditorHost, localProjectStore, measureCaptionWidthFrac, MediaIndexingService, IndexingStatusRelay, createDomFrameTap, createDomOpenMedia, renderMattePng, encodeFrameJPEG, readConfirmThreshold, writeConfirmThreshold, WaveformCache } from "@frontstage/ui";
 import type { KeyConfig, FalKeyConfig, MediaIndexingHost, MediaIndexingFacade } from "@frontstage/ui";
 import { AgentSession, ChatSessionStore, ToolExecutor, buildCatalog, toolsToMcp, ImageGenerator, GenerationService, listLLMModels, listImageModels, defaultLLMModel, defaultImageModel, MODEL_CATALOG, makeEntryUrl, TranscriptionService, EmbeddingService, createTransformersPipelines, LocalAsrService, createTransformersAsrPipelines, SkillStore, SkillCatalog, skillsSection } from "@frontstage/ai";
@@ -30,6 +32,9 @@ import type { DesktopProjectNavBridge, ProjectNavSession } from "./desktop-proje
 import { DesktopExportGateway } from "./desktop-export-gateway.js";
 import { DesktopAiGateway } from "./desktop-ai-gateway.js";
 import { DesktopGenGateway } from "./desktop-gen-gateway.js";
+import { DesktopMorphicBridge } from "./desktop-morphic.js";
+import { MorphicGateway, MorphicStudio, RoutingGenGateway } from "@frontstage/ai";
+import type { StudioMorphic } from "@frontstage/ui";
 import { makeDesktopAudioExtractor } from "./desktop-audio-extract.js";
 import { createDesktopMediaImport } from "./desktop-media-import.js";
 import { createDesktopLut } from "./desktop-lut.js";
@@ -46,7 +51,8 @@ library.subscribe(() => {
   waveformCache.ingestLibraryBytes(library.getSnapshot().entries, (e) => library.bytesFor(e));
 });
 const gateway = new DesktopGateway();
-const { host, wrappedGateway, appendGenerationLog, getGenerationLog } = createEditorHost(store, library, gateway);
+const { host, wrappedGateway, appendGenerationLog, getGenerationLog, production } = createEditorHost(store, library, gateway);
+const characterLibrary = new CharacterLibrary(createDesktopCharacterStorage());
 const session = new ProjectSession(host, wrappedGateway);
 const exportGateway = new DesktopExportGateway();
 
@@ -65,6 +71,9 @@ const imageGenerator = new ImageGenerator({
 
 // Generation orchestrator (image/video jobs) — gateway is main-process-only (fal key never in renderer).
 const genGateway = new DesktopGenGateway();
+// Generation jobs route "morphic/*" endpoints to Morphic (MCP, signed in from Settings) and the rest to fal.
+const morphicBridge = new DesktopMorphicBridge();
+const jobGateway = new RoutingGenGateway(genGateway, new MorphicGateway(morphicBridge));
 const generationHost: GenerationHost = {
   addPlaceholder: (entry) => library.addPlaceholder(entry),
   patchEntry: (id, patch) => library.patchEntry(id, patch),
@@ -79,9 +88,25 @@ const generationHost: GenerationHost = {
   },
 };
 const generationServiceRef: { current: GenerationService } = {
-  current: new GenerationService(genGateway, generationHost),
+  current: new GenerationService(jobGateway, generationHost),
 };
 (window as unknown as Record<string, unknown>).__generationService = generationServiceRef;
+
+const morphicStudio = new MorphicStudio({
+  bridge: morphicBridge,
+  generation: {
+    addPlaceholder: (entry) => library.addPlaceholder(entry),
+    startJob: (args) => generationServiceRef.current.startJob(args),
+  },
+  entries: () => library.getSnapshot().entries,
+  loadBytes: async (entry) => library.bytesFor(entry) ?? (entry.source.kind === "project" ? library.readMedia(entry.source.relativePath) : undefined),
+  newId: () => crypto.randomUUID(),
+});
+const morphic: StudioMorphic = {
+  account: morphicBridge,
+  generateShotTake: (p, scene, shot, opts) => morphicStudio.generateShotTake(p, scene, shot, opts),
+  generateCharacterDesign: (c, opts) => morphicStudio.generateCharacterDesign(c, opts),
+};
 
 // Visual-search embedding runtime (SigLIP2, M12C) — long-lived across project opens; the model
 // weights are a one-time download, not per-project state. createTransformersPipelines' loader
@@ -135,7 +160,7 @@ const indexingFacade: MediaIndexingFacade = {
 // dispose+recreate first since there's no separate "close project" action.
 session.onOpened = () => {
   generationServiceRef.current.dispose();
-  generationServiceRef.current = new GenerationService(genGateway, generationHost);
+  generationServiceRef.current = new GenerationService(jobGateway, generationHost);
   generationServiceRef.current.resumePending();
 
   mediaIndexingServiceRef.current.dispose();
@@ -473,6 +498,9 @@ function FrontstageDesktopApp() {
       engineRef={engineRef}
       getGenerationLog={getGenerationLog}
       indexing={indexingFacade}
+      production={production}
+      characterLibrary={characterLibrary}
+      morphic={morphic}
       agent={{
         session: agentSession,
         model: agentModelId,

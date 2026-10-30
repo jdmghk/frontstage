@@ -1567,6 +1567,25 @@ function skillsCatalogCachePath() {
   return path.join(app.getPath("userData"), "skills-catalog.json");
 }
 
+let _charactersFsMod = null;
+async function loadCharactersFs() {
+  if (!_charactersFsMod) _charactersFsMod = await import("./characters-fs.mjs");
+  return _charactersFsMod;
+}
+
+function charactersRoot() {
+  return path.join(os.homedir(), ".frontstage", "characters");
+}
+
+ipcMain.handle("characters:listIds", async () => (await loadCharactersFs()).listCharacterIds(charactersRoot()));
+ipcMain.handle("characters:readFile", async (_e, id, name) => (await loadCharactersFs()).readCharacterFile(charactersRoot(), id, name));
+ipcMain.handle("characters:writeFile", async (_e, id, name, bytes) => {
+  (await loadCharactersFs()).writeCharacterFile(charactersRoot(), id, name, bytes);
+});
+ipcMain.handle("characters:remove", async (_e, id) => {
+  (await loadCharactersFs()).removeCharacter(charactersRoot(), id);
+});
+
 ipcMain.handle("skills:list", async () => {
   const m = await loadSkillsFs();
   return m.listSkills(skillsRoot());
@@ -1625,4 +1644,100 @@ ipcMain.handle("skills:cacheRead", () => {
 ipcMain.handle("skills:cacheWrite", (_e, text) => {
   fs.mkdirSync(path.dirname(skillsCatalogCachePath()), { recursive: true });
   fs.writeFileSync(skillsCatalogCachePath(), text, "utf8");
+});
+
+// ── Morphic IPC (Studio, Phase 3) ──────────────────────────────────────────
+// Morphic's hosted MCP server, signed in with OAuth (client id = our published metadata document).
+// Tokens are encrypted with safeStorage in main and never reach the renderer; see morphic-client.mjs.
+
+const MORPHIC_TOKENS = {
+  enc: path.join(app.getPath("userData"), "morphic-tokens.bin"),
+  plain: path.join(app.getPath("userData"), "morphic-tokens-plain.json"),
+};
+
+const morphicTokenStore = {
+  load() {
+    try {
+      if (process.env.FRONTSTAGE_E2E === "1" && !safeStorage.isEncryptionAvailable()) {
+        return fs.existsSync(MORPHIC_TOKENS.plain) ? JSON.parse(fs.readFileSync(MORPHIC_TOKENS.plain, "utf8")) : null;
+      }
+      if (!fs.existsSync(MORPHIC_TOKENS.enc)) return null;
+      return JSON.parse(safeStorage.decryptString(fs.readFileSync(MORPHIC_TOKENS.enc)));
+    } catch {
+      return null;
+    }
+  },
+  save(value) {
+    if (process.env.FRONTSTAGE_E2E === "1" && !safeStorage.isEncryptionAvailable()) {
+      fs.writeFileSync(MORPHIC_TOKENS.plain, JSON.stringify(value), "utf8");
+      return;
+    }
+    fs.writeFileSync(MORPHIC_TOKENS.enc, safeStorage.encryptString(JSON.stringify(value)));
+  },
+  clear() {
+    try { fs.unlinkSync(MORPHIC_TOKENS.enc); } catch { /* ignore */ }
+    try { fs.unlinkSync(MORPHIC_TOKENS.plain); } catch { /* ignore */ }
+  },
+};
+
+let _morphicMod = null;
+let _morphicClient = null;
+async function morphic() {
+  if (!_morphicMod) _morphicMod = await import("./morphic-client.mjs");
+  if (!_morphicClient) {
+    _morphicClient = _morphicMod.createMorphicClient({ store: morphicTokenStore, openBrowser: (url) => shell.openExternal(url) });
+  }
+  return { mod: _morphicMod, client: _morphicClient };
+}
+
+// Errors come back as { error } (the gen:* convention) so the renderer shows Morphic's own message.
+function morphicError(err) {
+  return { error: err && err.name === "MorphicAuthRequired" ? "Not signed in to Morphic" : String(err && err.message ? err.message : err) };
+}
+
+ipcMain.handle("morphic:status", () => ({ signedIn: !!morphicTokenStore.load()?.tokens }));
+
+ipcMain.handle("morphic:signIn", async () => {
+  try {
+    await (await morphic()).client.signIn();
+    return { ok: true };
+  } catch (err) {
+    return morphicError(err);
+  }
+});
+
+ipcMain.handle("morphic:signOut", async () => {
+  await (await morphic()).client.signOut();
+  return { ok: true };
+});
+
+ipcMain.handle("morphic:callTool", async (_e, { name, args }) => {
+  const { mod, client } = await morphic();
+  if (!mod.RENDERER_TOOLS.has(name)) return { error: `Morphic tool not allowed: ${name}` };
+  try {
+    const r = await client.callTool(name, args ?? {});
+    return { result: { structuredContent: r.structuredContent, content: r.content, isError: !!r.isError } };
+  } catch (err) {
+    return morphicError(err);
+  }
+});
+
+ipcMain.handle("morphic:upload", async (_e, { bytes, contentType, fileName, projectId }) => {
+  try {
+    return { assetId: await (await morphic()).client.uploadFile(new Uint8Array(bytes), contentType, fileName, projectId) };
+  } catch (err) {
+    return morphicError(err);
+  }
+});
+
+ipcMain.handle("morphic:download", async (_e, { url }) => {
+  try {
+    const u = new URL(url);
+    if (u.protocol !== "https:") return { error: "Morphic result URL must be https" };
+    const res = await fetch(u);
+    if (!res.ok) return { error: `Download failed (HTTP ${res.status})` };
+    return { data: await res.arrayBuffer() };
+  } catch (err) {
+    return morphicError(err);
+  }
 });
