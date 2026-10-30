@@ -711,7 +711,7 @@ async function loadExportCodecs() {
   return _exportCodecsMod;
 }
 
-ipcMain.handle("export:start", async (_event, { width, height, fps, audio, codec, outPath }) => {
+ipcMain.handle("export:start", async (_event, { width, height, fps, audio, codec, outPath, subtitlesSrt }) => {
   const codecsMod = await loadExportCodecs();
   const CODECS = codecsMod.CODECS;
   if (activeSession !== null) {
@@ -736,8 +736,12 @@ ipcMain.handle("export:start", async (_event, { width, height, fps, audio, codec
   if (!ffmpegPath) throw new Error("ffmpeg-static not found");
 
   const id = String(++sessionCounter);
-  const videoOnlyPath = audio ? path.join(os.tmpdir(), `export-vid-${id}${spec.ext}`) : resolved;
+  if (subtitlesSrt != null && (typeof subtitlesSrt !== "string" || subtitlesSrt.length > 2_000_000)) throw new Error("invalid subtitles");
+  const needsMux = !!audio || !!subtitlesSrt;
+  const videoOnlyPath = needsMux ? path.join(os.tmpdir(), `export-vid-${id}${spec.ext}`) : resolved;
   const audioPath = audio ? path.join(os.tmpdir(), `export-aud-${id}.f32le`) : null;
+  const srtPath = subtitlesSrt ? path.join(os.tmpdir(), `export-sub-${id}.srt`) : null;
+  if (srtPath) fs.writeFileSync(srtPath, subtitlesSrt, "utf8");
 
   let audioFd = null;
   let videoProc = null;
@@ -755,7 +759,7 @@ ipcMain.handle("export:start", async (_event, { width, height, fps, audio, codec
     videoProc.stderr.on("data", (d) => { videoStderr += d.toString(); });
     videoProc.on("error", (err) => { videoStderr += "\nspawn error: " + err.message; });
 
-    const session = { ffmpegPath, opts: { width, height, fps, audio, codec, outPath: resolved }, videoProc, videoStderr: () => videoStderr, audioPath, audioFd, videoOnlyPath, id };
+    const session = { ffmpegPath, opts: { width, height, fps, audio, codec, outPath: resolved }, videoProc, videoStderr: () => videoStderr, audioPath, audioFd, videoOnlyPath, srtPath, id };
     exportSessions.set(id, session);
     activeSession = id;
   } catch (e) {
@@ -806,10 +810,10 @@ ipcMain.handle("export:finish", async (_event) => {
     fs.closeSync(session.audioFd);
   }
 
-  const { opts, audioPath, videoOnlyPath, ffmpegPath } = session;
+  const { opts, audioPath, videoOnlyPath, ffmpegPath, srtPath } = session;
 
-  if (!audioPath) {
-    // No audio — video-only path is already the final outPath
+  if (!audioPath && !srtPath) {
+    // No audio or subtitles — video-only path is already the final outPath
     return opts.outPath;
   }
 
@@ -817,7 +821,7 @@ ipcMain.handle("export:finish", async (_event) => {
   const { audio } = opts;
   const codecsMod = await loadExportCodecs();
   await new Promise((resolve, reject) => {
-    const muxArgs = codecsMod.muxArgs(codecsMod.CODECS[opts.codec], audio, videoOnlyPath, audioPath, opts.outPath);
+    const muxArgs = codecsMod.muxArgs(codecsMod.CODECS[opts.codec], audio, videoOnlyPath, audioPath, opts.outPath, srtPath);
 
     const muxProc = spawn(ffmpegPath, muxArgs, { stdio: ["ignore", "pipe", "pipe"] });
     let muxStderr = "";
@@ -831,7 +835,8 @@ ipcMain.handle("export:finish", async (_event) => {
 
   // Cleanup temp files
   try { fs.unlinkSync(videoOnlyPath); } catch { /* ignore */ }
-  try { fs.unlinkSync(audioPath); } catch { /* ignore */ }
+  try { if (audioPath) fs.unlinkSync(audioPath); } catch { /* ignore */ }
+  try { if (srtPath) fs.unlinkSync(srtPath); } catch { /* ignore */ }
 
   return opts.outPath;
 });
@@ -1776,13 +1781,13 @@ ipcMain.handle("media:sampleFrames", async (_e, req) => {
 
 // Export size presets (timeline / YouTube 1080p / 4K) as a native dialog, so it works from both the
 // macOS menu bar and the in-app File menu. Returns the chosen preset id, or null on cancel.
-ipcMain.handle("export:choosePreset", async (e, { options }) => {
+ipcMain.handle("export:choosePreset", async (e, { options, captions }) => {
   const enabled = (options ?? []).filter((o) => o && o.enabled && typeof o.id === "string" && typeof o.label === "string");
   if (enabled.length === 0) return null;
   // Headless tests can't click a dialog: take FRONTSTAGE_E2E_EXPORT_PRESET or the first option.
   if (process.env.FRONTSTAGE_E2E === "1") {
     const want = process.env.FRONTSTAGE_E2E_EXPORT_PRESET;
-    return (enabled.find((o) => o.id === want) ?? enabled[0]).id;
+    return { id: (enabled.find((o) => o.id === want) ?? enabled[0]).id, subtitleTrack: !!captions && process.env.FRONTSTAGE_E2E_SUBTITLE_TRACK === "1" };
   }
   const detail = (options ?? []).filter((o) => o && o.note).map((o) => `${o.label}: ${o.note}`).join("\n");
   const win = BrowserWindow.fromWebContents(e.sender);
@@ -1793,6 +1798,7 @@ ipcMain.handle("export:choosePreset", async (e, { options }) => {
     buttons: [...enabled.map((o) => o.label), "Cancel"],
     cancelId: enabled.length,
     defaultId: 0,
+    ...(captions ? { checkboxLabel: "Captions as a subtitle track (switchable on YouTube) instead of burned into the picture", checkboxChecked: false } : {}),
   });
-  return r.response < enabled.length ? enabled[r.response].id : null;
+  return r.response < enabled.length ? { id: enabled[r.response].id, subtitleTrack: !!captions && r.checkboxChecked } : null;
 });

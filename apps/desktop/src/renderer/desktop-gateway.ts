@@ -11,7 +11,7 @@ interface DesktopProjectBridge {
   pickOpen(): Promise<string | null>;
   pickSaveAs(name: string): Promise<string | null>;
   pickExportSave(name: string, filter?: ExportSaveFilter): Promise<string | null>;
-  choosePreset(options: { id: string; label: string; enabled: boolean; note?: string }[]): Promise<string | null>;
+  choosePreset(options: { id: string; label: string; enabled: boolean; note?: string }[], captions?: boolean): Promise<{ id: string; subtitleTrack: boolean } | null>;
   // Writes text directly to an already-authorized absolute path (M12B T3 — xml/fcpxml export with
   // an explicit outputPath). overwrite=false + an existing file → rejects.
   writeExportText(outPath: string, contents: string, overwrite?: boolean): Promise<string>;

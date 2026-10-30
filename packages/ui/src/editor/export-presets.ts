@@ -1,4 +1,5 @@
 import type { MediaManifestEntry, Timeline } from "@frontstage/core";
+import { cuesFromCaptionClips } from "@frontstage/core";
 
 export type ExportPresetId = "timeline" | "youtube-1080p" | "youtube-4k";
 
@@ -20,12 +21,19 @@ export interface ExportInfo {
   height: number;
   /** Tallest video/image source used on the timeline, if known. */
   maxSourceHeight?: number;
+  /** The timeline has caption clips (they can go out as a subtitle track instead of burned in). */
+  hasCaptions?: boolean;
 }
 
 export function exportInfo(timeline: Timeline, entries: MediaManifestEntry[]): ExportInfo {
   const used = new Set(timeline.tracks.flatMap((t) => t.clips.map((c) => c.mediaRef)));
   const heights = entries.filter((e) => used.has(e.id) && (e.type === "video" || e.type === "image") && e.sourceHeight).map((e) => e.sourceHeight!);
-  return { width: timeline.width, height: timeline.height, maxSourceHeight: heights.length ? Math.max(...heights) : undefined };
+  return {
+    width: timeline.width,
+    height: timeline.height,
+    maxSourceHeight: heights.length ? Math.max(...heights) : undefined,
+    hasCaptions: cuesFromCaptionClips(timeline, timeline.fps).length > 0,
+  };
 }
 
 const is16x9 = (w: number, h: number) => Math.abs(w / h - 16 / 9) < 0.01;

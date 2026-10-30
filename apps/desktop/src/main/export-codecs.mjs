@@ -17,16 +17,22 @@ export function videoArgs(spec, { width, height, fps }, outPath) {
   return ["-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${width}x${height}`, "-r", String(fps), "-i", "pipe:0", ...spec.vargs, outPath];
 }
 
-export function muxArgs(spec, { sampleRate, channels }, videoPath, audioPath, outPath) {
-  return [
-    "-y",
-    "-i", videoPath,
-    "-f", "f32le", "-ar", String(sampleRate), "-ac", String(channels), "-i", audioPath,
-    "-map", "0:v", "-map", "1:a",
-    "-c:v", "copy",
-    ...spec.aargs,
-    ...spec.muxFlags,
-    "-shortest",
-    outPath,
-  ];
+/**
+ * Combines the encoded video with the raw audio (optional) and an SRT file (optional) as a soft
+ * subtitle track (mov_text: the MP4/MOV text format players and YouTube read).
+ */
+export function muxArgs(spec, audio, videoPath, audioPath, outPath, srtPath = null) {
+  const args = ["-y", "-i", videoPath];
+  if (audioPath) args.push("-f", "f32le", "-ar", String(audio.sampleRate), "-ac", String(audio.channels), "-i", audioPath);
+  if (srtPath) args.push("-f", "srt", "-i", srtPath);
+  args.push("-map", "0:v");
+  if (audioPath) args.push("-map", "1:a");
+  if (srtPath) args.push("-map", `${audioPath ? 2 : 1}:s`);
+  args.push("-c:v", "copy");
+  if (audioPath) args.push(...spec.aargs);
+  if (srtPath) args.push("-c:s", "mov_text", "-metadata:s:s:0", "language=eng");
+  args.push(...spec.muxFlags);
+  if (audioPath) args.push("-shortest");
+  args.push(outPath);
+  return args;
 }

@@ -1,7 +1,7 @@
 import type { ExportSink, PushFrameSource } from "@frontstage/engine";
 
 export interface DesktopExportBridge {
-  start(opts: { width: number; height: number; fps: number; audio?: { sampleRate: number; channels: number }; codec: string; outPath: string }): Promise<string>;
+  start(opts: { width: number; height: number; fps: number; audio?: { sampleRate: number; channels: number }; codec: string; outPath: string; subtitlesSrt?: string }): Promise<string>;
   videoFrame(buf: Uint8Array): void;
   audioData(buf: Uint8Array): void;
   finish(): Promise<string>;
@@ -10,12 +10,15 @@ export interface DesktopExportBridge {
 export interface FfmpegIpcSinkOptions {
   codec: string;
   outPath: string;
+  /** SRT text muxed in as a soft subtitle track. */
+  subtitlesSrt?: string;
 }
 
 export class FfmpegIpcSink implements ExportSink {
   private bridge: DesktopExportBridge;
   private codec: string;
   private outPath: string;
+  private subtitlesSrt?: string;
   private width = 0;
   private height = 0;
 
@@ -23,12 +26,13 @@ export class FfmpegIpcSink implements ExportSink {
     this.bridge = bridge;
     this.codec = opts.codec;
     this.outPath = opts.outPath;
+    this.subtitlesSrt = opts.subtitlesSrt;
   }
 
   async configure(opts: { width: number; height: number; fps: number; audio?: { sampleRate: number; channels: number } }): Promise<void> {
     this.width = opts.width;
     this.height = opts.height;
-    await this.bridge.start({ ...opts, codec: this.codec, outPath: this.outPath });
+    await this.bridge.start({ ...opts, codec: this.codec, outPath: this.outPath, ...(this.subtitlesSrt ? { subtitlesSrt: this.subtitlesSrt } : {}) });
   }
 
   async ready(): Promise<void> {

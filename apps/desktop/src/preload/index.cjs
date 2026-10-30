@@ -111,7 +111,7 @@ contextBridge.exposeInMainWorld("desktopProject", {
   pickOpen: () => ipcRenderer.invoke("project:pickOpen"),
   pickSaveAs: (n) => ipcRenderer.invoke("project:pickSaveAs", n),
   pickExportSave: (name, filter) => ipcRenderer.invoke("project:pickExportSave", name, filter),
-  choosePreset: (options) => ipcRenderer.invoke("export:choosePreset", { options }),
+  choosePreset: (options, captions) => ipcRenderer.invoke("export:choosePreset", { options, captions }),
   writeExportText: (outPath, contents, overwrite) => ipcRenderer.invoke("project:writeExportText", { outPath, contents, overwrite }),
   readText: (d, n) => ipcRenderer.invoke("project:readText", d, n),
   writeText: (d, n, x) => ipcRenderer.invoke("project:writeText", d, n, x),

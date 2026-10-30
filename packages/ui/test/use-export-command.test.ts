@@ -169,7 +169,7 @@ test("exportProject calls pickTarget with suggested name and progresses state", 
     result.current.exportProject();
   });
 
-  expect(gateway.pickTarget).toHaveBeenCalledWith("My Project", { width: 1920, height: 1080, maxSourceHeight: undefined });
+  expect(gateway.pickTarget).toHaveBeenCalledWith("My Project", { width: 1920, height: 1080, maxSourceHeight: undefined, hasCaptions: false });
   expect(gateway.run).toHaveBeenCalledTimes(1);
   // After completion, state should be null
   expect(result.current.exportState).toBeNull();

@@ -32,6 +32,6 @@ describe("export presets", () => {
       { id: "a", type: "video", sourceHeight: 720 },
       { id: "b", type: "video", sourceHeight: 2160 },
     ] as unknown as MediaManifestEntry[];
-    expect(exportInfo(withClip as never, entries)).toEqual({ width: t.width, height: t.height, maxSourceHeight: 720 });
+    expect(exportInfo(withClip as never, entries)).toEqual({ width: t.width, height: t.height, maxSourceHeight: 720, hasCaptions: false });
   });
 });

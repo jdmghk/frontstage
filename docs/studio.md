@@ -48,6 +48,7 @@ rail, no separate dashboard.
 | Other transition types (wipes, slides) | Not supported | Dissolve plus the existing fades only |
 | Automatic retry of generation jobs | **Implemented** | A submit refused with 429/502/503/504 is retried up to 3 times with backoff (never a network error, which may have started the job); up to 3 consecutive failed status checks are tolerated |
 | Subtitles | Existing feature | Captions tab: Whisper transcription, caption clips burned into the export, SRT/VTT export (File → Captions) for YouTube upload |
+| Captions as an embedded subtitle track | **Implemented** (desktop) | Export dialog checkbox *Captions as a subtitle track…*: captions are left out of the picture and muxed into the MP4 as a switchable `mov_text` track (checked with ffprobe) |
 
 ## How it's stored
 

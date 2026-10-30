@@ -18,4 +18,12 @@ describe("export codecs", () => {
       "-y -i /v -f f32le -ar 48000 -ac 2 -i /a -map 0:v -map 1:a -c:v copy -c:a aac -shortest /o",
     );
   });
+
+  test("captions as a soft subtitle track: mov_text, mapped after audio, or alone with video", () => {
+    const withAudio = muxArgs(CODECS.libx264_youtube, { sampleRate: 48000, channels: 2 }, "/v.mp4", "/a.f32le", "/o.mp4", "/s.srt").join(" ");
+    expect(withAudio).toContain("-f srt -i /s.srt -map 0:v -map 1:a -map 2:s");
+    expect(withAudio).toContain("-c:s mov_text");
+    const noAudio = muxArgs(CODECS.libx264, null, "/v.mp4", null, "/o.mp4", "/s.srt").join(" ");
+    expect(noAudio).toBe("-y -i /v.mp4 -f srt -i /s.srt -map 0:v -map 1:s -c:v copy -c:s mov_text -metadata:s:s:0 language=eng /o.mp4");
+  });
 });
