@@ -7,8 +7,8 @@ import { renderSpanToMp4 } from "@frontstage/engine";
 import "@frontstage/ui/theme/tokens.css";
 import { CharacterLibrary, createOpfsCharacterStorage, type ProductionStore } from "@frontstage/ui";
 import { restoreLayout, createEditorHost, localProjectStore, measureCaptionWidthFrac, MediaIndexingService, IndexingStatusRelay, createDomFrameTap, createDomOpenMedia, renderMattePng, encodeFrameJPEG, readConfirmThreshold, writeConfirmThreshold } from "@frontstage/ui";
-import type { KeyConfig, FalKeyConfig, RelayConfig, GenerationFacade, MediaIndexingHost, MediaIndexingFacade, FrameSampler } from "@frontstage/ui";
-import { AgentSession, ChatSessionStore, ToolExecutor, buildCatalog, ImageGenerator, GenerationService, listLLMModels, listImageModels, defaultLLMModel, defaultImageModel, makeEntryUrl, TranscriptionService, EmbeddingService, createTransformersPipelines, LocalAsrService, createTransformersAsrPipelines, SkillStore, SkillCatalog, skillsSection, VoiceStudio, VeoStudio, STUDIO_MODELS, DEFAULT_STUDIO_MODEL } from "@frontstage/ai";
+import type { KeyConfig, FalKeyConfig, RelayConfig, GenerationFacade, MediaIndexingHost, MediaIndexingFacade, FrameSampler, StudioMorphic } from "@frontstage/ui";
+import { AgentSession, ChatSessionStore, ToolExecutor, buildCatalog, ImageGenerator, GenerationService, listLLMModels, listImageModels, defaultLLMModel, defaultImageModel, makeEntryUrl, TranscriptionService, EmbeddingService, createTransformersPipelines, LocalAsrService, createTransformersAsrPipelines, SkillStore, SkillCatalog, skillsSection, VoiceStudio, VeoStudio, STUDIO_MODELS, DEFAULT_STUDIO_MODEL, MorphicGateway, MorphicStudio, RoutingGenGateway } from "@frontstage/ai";
 import type { GenerationHost, TranscriptionHost, ToolContext, ToolResult } from "@frontstage/ai";
 import { App } from "./App.js";
 import { sampleTimeline, buildSampleLibrary } from "./sample-project.js";
@@ -17,7 +17,7 @@ import { WebExportGateway } from "./web-export.js";
 import { createWebInteropExport } from "./web-interop-export.js";
 import { WebAiGateway } from "./web-ai-gateway.js";
 import { WebGenGateway } from "./web-gen-gateway.js";
-import { WebClaudeGateway, makeWebFrameSampler } from "./web-studio.js";
+import { WebClaudeGateway, WebMorphicBridge, makeWebFrameSampler } from "./web-studio.js";
 import { makeWebAudioExtractor } from "./web-audio-extract.js";
 import { createWebMediaImport } from "./web-media-import.js";
 import { createWebSkillStorage, createWebSkillCatalogDeps } from "./web-skills.js";
@@ -59,6 +59,8 @@ interface WebStudio {
   voice: VoiceStudio;
   veo: VeoStudio;
   sampleFrames: FrameSampler;
+  /** Morphic through the self-host proxy (absent in relay mode). */
+  morphic?: { studio: StudioMorphic; available(): Promise<boolean> };
 }
 
 function FrontstageApp({ store, session, library, exportGateway, interopExport, agentSession, imageGenerator, sessionStore, mentionItems, aiProxyUrl, engineRef, getGenerationLog, genGateway, generationFacade, executor, transcriptionFacade, indexing, skillStore, skillCatalog, production, characterLibrary, studio }: FrontstageAppProps) {
@@ -67,6 +69,10 @@ function FrontstageApp({ store, session, library, exportGateway, interopExport, 
   const [proxyUrl, setProxyUrl] = useState(() => localStorage.getItem("frontstage.ai.proxyUrl") ?? aiProxyUrl);
   const [falEnabled, setFalEnabled] = useState(false);
   const [claudeOn, setClaudeOn] = useState(false);
+  const [morphicOn, setMorphicOn] = useState(false);
+  useEffect(() => {
+    studio.morphic?.available().then(setMorphicOn).catch(() => setMorphicOn(false));
+  }, [studio, proxyUrl]);
   const [relayAnthropicKey, setRelayAnthropicKey] = useState(() => getUserKeys().anthropicKey ?? "");
   const [studioModel, setStudioModel] = useState(() => localStorage.getItem("frontstage.studio.model") ?? DEFAULT_STUDIO_MODEL);
   const studioModelRef = useRef(studioModel);
@@ -193,6 +199,7 @@ function FrontstageApp({ store, session, library, exportGateway, interopExport, 
       relayAuth={relayAuth}
       production={production}
       characterLibrary={characterLibrary}
+      morphic={morphicOn ? studio.morphic?.studio : undefined}
       writer={claudeOn ? writer : undefined}
       sampleFrames={claudeOn ? studio.sampleFrames : undefined}
       voice={falEnabled ? studio.voice : undefined}
@@ -291,6 +298,9 @@ async function bootstrap() {
   const genGateway = RELAY_MODE
     ? new WebGenGateway({ origin: getRelayOrigin(), getKeys: getUserKeys })
     : new WebGenGateway(aiProxyUrl, aiProxyToken);
+  // Morphic needs the self-host proxy as its MCP client (no browser CORS); none in relay mode.
+  const morphicBridge = RELAY_MODE ? null : new WebMorphicBridge(() => localStorage.getItem("frontstage.ai.proxyUrl") ?? aiProxyUrl, aiProxyToken);
+  const jobGateway = morphicBridge ? new RoutingGenGateway(genGateway, new MorphicGateway(morphicBridge)) : genGateway;
   const generationHost: GenerationHost = {
     addPlaceholder: (entry) => library.addPlaceholder(entry),
     patchEntry: (id, patch) => library.patchEntry(id, patch),
@@ -305,7 +315,7 @@ async function bootstrap() {
     },
   };
   const generationServiceRef: { current: GenerationService } = {
-    current: new GenerationService(genGateway, generationHost),
+    current: new GenerationService(jobGateway, generationHost),
   };
   (window as unknown as Record<string, unknown>).__generationService = generationServiceRef;
 
@@ -372,7 +382,7 @@ async function bootstrap() {
   // dispose+recreate first since there's no separate "close project" action.
   session.onOpened = () => {
     generationServiceRef.current.dispose();
-    generationServiceRef.current = new GenerationService(genGateway, generationHost);
+    generationServiceRef.current = new GenerationService(jobGateway, generationHost);
     generationServiceRef.current.resumePending();
 
     mediaIndexingServiceRef.current.dispose();
@@ -428,7 +438,29 @@ async function bootstrap() {
       genGateway.uploadFile(bytes, contentType, fileName),
   };
 
+  const morphicStudio = morphicBridge
+    ? new MorphicStudio({
+        bridge: morphicBridge,
+        generation: { addPlaceholder: (e) => library.addPlaceholder(e), startJob: (a) => generationServiceRef.current.startJob(a) },
+        entries: () => library.getSnapshot().entries,
+        loadBytes: (entry) => library.readEntryBytes(entry.id).catch(() => undefined),
+        newId: () => crypto.randomUUID(),
+      })
+    : null;
   const studio: WebStudio = {
+    ...(morphicBridge && morphicStudio
+      ? {
+          morphic: {
+            available: () => morphicBridge.available(),
+            studio: {
+              account: morphicBridge,
+              generateShotTake: (p, scene, shot, opts) => morphicStudio.generateShotTake(p, scene, shot, opts),
+              generateCharacterDesign: (c, opts) => morphicStudio.generateCharacterDesign(c, opts),
+              listTrainedCharacters: () => morphicStudio.listTrainedCharacters(),
+            },
+          },
+        }
+      : {}),
     claude: new WebClaudeGateway(
       RELAY_MODE ? { mode: "relay", origin: getRelayOrigin(), getKeys: getUserKeys } : { mode: "proxy", proxyUrl: aiProxyUrl, proxyToken: aiProxyToken },
     ),

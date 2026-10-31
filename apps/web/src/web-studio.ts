@@ -1,4 +1,4 @@
-import type { ClaudeGateway, ClaudeStudioRequest, ClaudeStudioResult, SampledFrame } from "@frontstage/ai";
+import type { ClaudeGateway, ClaudeStudioRequest, ClaudeStudioResult, MorphicBridge, MorphicToolResult, SampledFrame } from "@frontstage/ai";
 import type { FrameSampler } from "@frontstage/ui";
 import type { UserKeys } from "./relay-config.js";
 
@@ -93,4 +93,82 @@ export function makeWebFrameSampler(readBytes: (mediaId: string) => Promise<Uint
       if (url) URL.revokeObjectURL(url);
     }
   };
+}
+
+/**
+ * Morphic in the web editor, through the self-host proxy (MORPHIC=1), which is the MCP client:
+ * browsers can't call Morphic's server directly (no CORS). Sign-in opens Morphic's page in a new
+ * tab and waits until the proxy reports the session; results download through /import/download.
+ */
+export class WebMorphicBridge implements MorphicBridge {
+  constructor(private readonly proxyUrl: () => string, private readonly proxyToken?: string) {}
+
+  private headers(json = true): Record<string, string> {
+    const h: Record<string, string> = json ? { "Content-Type": "application/json" } : {};
+    if (this.proxyToken) h["Authorization"] = "Bearer " + this.proxyToken;
+    return h;
+  }
+
+  private async post<T>(route: string, body?: unknown): Promise<T> {
+    const res = await fetch(this.proxyUrl() + route, { method: "POST", headers: this.headers(), body: body === undefined ? undefined : JSON.stringify(body) });
+    const data = (await res.json().catch(() => ({}))) as T & { error?: string };
+    if (!res.ok) throw new Error(data.error ?? `Morphic proxy error ${res.status}`);
+    return data;
+  }
+
+  /** False when the proxy doesn't run with MORPHIC=1 (route missing). */
+  async available(): Promise<boolean> {
+    try {
+      const res = await fetch(this.proxyUrl() + "/morphic/status", { headers: this.headers(false) });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+
+  async isSignedIn(): Promise<boolean> {
+    try {
+      const res = await fetch(this.proxyUrl() + "/morphic/status", { headers: this.headers(false) });
+      return res.ok && ((await res.json()) as { signedIn?: boolean }).signedIn === true;
+    } catch {
+      return false;
+    }
+  }
+
+  async signIn(): Promise<void> {
+    const r = await this.post<{ authorizationUrl?: string; signedIn?: boolean; error?: string }>("/morphic/sign-in");
+    if (r.error) throw new Error(r.error);
+    if (r.signedIn) return;
+    if (r.authorizationUrl) window.open(r.authorizationUrl, "_blank", "noopener");
+    const deadline = Date.now() + 5 * 60 * 1000;
+    while (Date.now() < deadline) {
+      await new Promise((res) => setTimeout(res, 2000));
+      const s = await fetch(this.proxyUrl() + "/morphic/status", { headers: this.headers(false) }).then((x) => x.json() as Promise<{ signedIn?: boolean; lastError?: string | null }>);
+      if (s.signedIn) return;
+      if (s.lastError) throw new Error(s.lastError);
+    }
+    throw new Error("Morphic sign-in timed out");
+  }
+
+  async signOut(): Promise<void> {
+    await this.post("/morphic/sign-out");
+  }
+
+  async callTool(name: string, args: Record<string, unknown>): Promise<MorphicToolResult> {
+    return (await this.post<{ result: MorphicToolResult }>("/morphic/call", { name, args })).result;
+  }
+
+  async uploadFile(bytes: Uint8Array, contentType: string, fileName: string, projectId?: string): Promise<string> {
+    const q = new URLSearchParams({ contentType, fileName, ...(projectId ? { projectId } : {}) });
+    const res = await fetch(`${this.proxyUrl()}/morphic/upload?${q}`, { method: "POST", headers: this.headers(false), body: bytes as BodyInit });
+    const data = (await res.json().catch(() => ({}))) as { assetId?: string; error?: string };
+    if (!res.ok || !data.assetId) throw new Error(data.error ?? `Morphic upload failed (${res.status})`);
+    return data.assetId;
+  }
+
+  async download(url: string): Promise<Uint8Array> {
+    const res = await fetch(this.proxyUrl() + "/import/download", { method: "POST", headers: this.headers(), body: JSON.stringify({ url }) });
+    if (!res.ok) throw new Error(`Download failed (${res.status})`);
+    return new Uint8Array(await res.arrayBuffer());
+  }
 }

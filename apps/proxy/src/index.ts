@@ -1,4 +1,5 @@
 import { createProxyServer } from "./server.js";
+import { MorphicProxy, defaultTokenFile, fileTokenStore } from "./morphic.js";
 
 // CLI entry point.
 // Env vars:
@@ -9,6 +10,9 @@ import { createProxyServer } from "./server.js";
 //   FAL_UPSTREAM        [optional]  fal queue base URL (default: https://queue.fal.run).
 //   FAL_REST_UPSTREAM   [optional]  fal REST base URL for storage uploads (default: https://rest.fal.ai).
 //   ANTHROPIC_API_KEY   [optional]  Enables /anthropic/* (Claude writing in the web editor).
+//   MORPHIC             [optional]  "1" enables /morphic/* (Morphic in the web editor; run the
+//                                   proxy on the same computer as the browser — sign-in uses a
+//                                   loopback redirect). MORPHIC_TOKEN_FILE overrides the token file.
 //   HOST                [optional]  Bind address (default: 127.0.0.1).
 //   PORT                [optional]  Bind port (default: 8787).
 
@@ -38,7 +42,9 @@ const host = process.env["HOST"] ?? "127.0.0.1";
 
 const anthropicKey = process.env["ANTHROPIC_API_KEY"];
 
-const server = createProxyServer({ apiKey, allowOrigin, proxyToken, falKey, falUpstream, falRestUpstream, anthropicKey });
+const morphic = process.env["MORPHIC"] === "1" ? new MorphicProxy(fileTokenStore(defaultTokenFile())) : undefined;
+
+const server = createProxyServer({ apiKey, allowOrigin, proxyToken, falKey, falUpstream, falRestUpstream, anthropicKey, morphic });
 server.listen(port, host, () => {
   console.log(`Proxy listening on http://${host}:${port}`);
 });

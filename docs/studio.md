@@ -24,7 +24,7 @@ rail, no separate dashboard.
 | Morphic sign-in (OAuth, desktop) | **Implemented** (Phase 3) | Settings → Generation → Morphic. See [morphic.md](morphic.md) |
 | Generate a shot take in Morphic | **Implemented** | Shot card → **Generate in Morphic**: reference-to-video with the cast's approved designs |
 | Generate a character design in Morphic | **Implemented** | Character card → **Generate design in Morphic**; mark it **Design** to approve |
-| Morphic in the web editor | Not supported | No loopback sign-in on the web; use **Import take…** with source *Morphic (manual)* |
+| Morphic in the web editor | **Implemented** (self-host proxy) | Run the proxy with `MORPHIC=1` on the same computer as the browser; it becomes the MCP client (Morphic's server allows no browser calls). Sign-in opens in a new tab. Not available through the cloud relay, which would have to keep every user's Morphic tokens server-side |
 | Morphic trained characters | **Implemented** (desktop) | Character card → **Link Morphic character…**; design generation then sends it as `edit_image` `character_id`. Morphic's `generate_video` takes no character id, so shots get the likeness through the approved designs made this way. Training happens in Morphic Studio |
 | Google Flow hand-off pack | **Implemented** (Phase 4, desktop) | Shot card → **Prepare for Flow…** writes `prompt.txt`, `shot.md` and up to 3 reference images to a folder. There is no public Flow API, so the clip comes back through **Import take…** |
 | Copy a shot's full prompt | **Implemented** | Shot card → **Copy prompt** (prompt + camera, framing, cast, continuity) |

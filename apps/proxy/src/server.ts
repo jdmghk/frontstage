@@ -1,3 +1,4 @@
+import type { MorphicProxy } from "./morphic.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { buildClaudeParams, claudeErrorResult, interpretClaudeMessage } from "@frontstage/ai/claude-wire";
 import crypto from "node:crypto";
@@ -21,6 +22,8 @@ export interface ProxyServerOptions {
   anthropicKey?: string;
   /** Test seam: builds the Anthropic client. */
   makeAnthropic?: (apiKey: string) => Anthropic;
+  /** Enables /morphic/* (Morphic for the web editor; the proxy is the MCP client). */
+  morphic?: MorphicProxy;
 }
 
 function corsHeaders(origin: string): Record<string, string> {
@@ -245,6 +248,15 @@ export function createProxyServer(opts: ProxyServerOptions): http.Server {
       }
       const make = opts.makeAnthropic ?? ((key: string) => new Anthropic({ apiKey: key, maxRetries: 3 }));
       void readBodyCapped(req, MAX_CLAUDE_REQUEST_BODY).then((body) => handleClaudeRun(body, make(opts.anthropicKey!), origin, res));
+      return;
+    }
+
+    if (pathname.startsWith("/morphic/") && opts.morphic) {
+      if (!isAuthorized(req, proxyToken)) {
+        writeUnauthorized(res, origin);
+        return;
+      }
+      void handleMorphic(opts.morphic, req, url, origin, res);
       return;
     }
 
@@ -732,5 +744,50 @@ async function handleClaudeRun(body: Buffer | { tooLarge: true }, client: Anthro
     reply(200, interpretClaudeMessage(message as never));
   } catch (err) {
     reply(200, claudeErrorResult(err));
+  }
+}
+
+// Morphic for the web editor. Results download through the existing SSRF-guarded /import/download.
+const MAX_MORPHIC_UPLOAD = 100 * 1024 * 1024; // Morphic's prepare_media_upload limit
+const MAX_MORPHIC_CALL_BODY = 1024 * 1024;
+
+async function handleMorphic(m: MorphicProxy, req: http.IncomingMessage, url: URL, origin: string, res: http.ServerResponse): Promise<void> {
+  const reply = (status: number, payload: unknown) => {
+    res.writeHead(status, jsonHeaders(origin));
+    res.end(JSON.stringify(payload));
+  };
+  const fail = (e: unknown) => {
+    const err = e as { name?: string; message?: string; status?: number };
+    if (err?.name === "MorphicAuthRequired") return reply(401, { error: "Not signed in to Morphic" });
+    reply(err?.status === 400 ? 400 : 502, { error: err?.message ?? String(e) });
+  };
+  try {
+    const route = url.pathname;
+    if (route === "/morphic/status" && req.method === "GET") return reply(200, { signedIn: m.isSignedIn(), lastError: m.lastSignInError });
+    if (route === "/morphic/sign-in" && req.method === "POST") return reply(200, await m.startSignIn());
+    if (route === "/morphic/sign-out" && req.method === "POST") {
+      await m.signOut();
+      return reply(200, { ok: true });
+    }
+    if (route === "/morphic/call" && req.method === "POST") {
+      const body = await readBodyCapped(req, MAX_MORPHIC_CALL_BODY);
+      if ("tooLarge" in body) return reply(413, { error: "request body too large" });
+      const { name, args } = JSON.parse(body.toString("utf-8")) as { name?: unknown; args?: unknown };
+      if (typeof name !== "string") return reply(400, { error: "name is required" });
+      const r = await m.call(name, args && typeof args === "object" ? (args as Record<string, unknown>) : {});
+      return reply(200, { result: { structuredContent: r.structuredContent, content: r.content, isError: !!r.isError } });
+    }
+    if (route === "/morphic/upload" && req.method === "POST") {
+      const contentType = url.searchParams.get("contentType") ?? "";
+      const fileName = url.searchParams.get("fileName") ?? "";
+      if (!UPLOAD_CONTENT_TYPE_RE.test(contentType) || !fileName) return reply(400, { error: "contentType and fileName are required" });
+      const body = await readBodyCapped(req, MAX_MORPHIC_UPLOAD);
+      if ("tooLarge" in body) return reply(413, { error: "file is over Morphic's 100 MB upload limit" });
+      const assetId = await m.upload(new Uint8Array(body), contentType, fileName, url.searchParams.get("projectId") ?? undefined);
+      return reply(200, { assetId });
+    }
+    reply(404, { error: "not found" });
+  } catch (e) {
+    fail(e);
   }
 }

@@ -54,8 +54,11 @@ or cancelled generation, or one without an asset, marks it *failed* with Morphic
 
 ## Limits and honest caveats
 
-- **Desktop only.** The web editor has no loopback redirect or main process. On the web, generate in
-  Morphic Studio and use **Import take…** with source *Morphic (manual)*.
+- **Web editor:** works through the self-host proxy started with `MORPHIC=1`, which acts as the MCP
+  client (Morphic's server sends no CORS headers, so browsers can't call it). The proxy must run on
+  the same computer as the browser because sign-in returns to `127.0.0.1:53917`. Its tokens are kept
+  in `~/.frontstage/morphic-proxy-tokens.json` (mode 0600; `MORPHIC_TOKEN_FILE` overrides). The cloud
+  relay doesn't offer Morphic.
 - **Credits.** Every generation spends your Morphic credits. Video costs much more than images.
 - **Model limits.** The app sends the shot's duration rounded to whole seconds, at 16:9. If the
   default model can't do that duration, Morphic refuses with a message naming what it supports; the
