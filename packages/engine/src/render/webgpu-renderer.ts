@@ -1,7 +1,9 @@
 import type { Mat2d, Size, Effect, BlendMode, CubeLUT } from "@frontstage/core";
-import { canonicalSort, resolveParam, parseGradeCurve, evalCurve, parseHueCurves, evalHueCurve, BLEND_MODES } from "@frontstage/core";
+import { canonicalSort, resolveParam, parseGradeCurve, parseHueCurves, BLEND_MODES } from "@frontstage/core";
 import type { GradeCurve, HueCurves } from "@frontstage/core";
 import type { CompositeLayer } from "./composite-layer.js";
+import type { Renderer } from "./renderer.js";
+import { effectUniformData, multiPassStep, curvesLutData, hueCurvesLutData } from "./effect-params.js";
 
 // Uniforms layout (all f32, 64 bytes / 16 floats):
 //   a, b, c, d, e, f        — affine matrix
@@ -778,8 +780,6 @@ const ALPHA_BLEND: GPUBlendState = {
   alpha: { srcFactor: "one", dstFactor: "one-minus-src-alpha", operation: "add" },
 };
 
-export type ReadPixelFn = (x: number, y: number) => Promise<[number, number, number, number]>;
-
 // Sub-pass descriptor used by the multi-pass effect runner. The bind group includes all inputs; the runner
 // opens a render pass to outputView and draws the full-screen quad.
 export interface SubPass {
@@ -885,7 +885,8 @@ function makeFxTexture(device: GPUDevice, w: number, h: number): GPUTexture {
   });
 }
 
-export class FrameRenderer {
+export class FrameRenderer implements Renderer {
+  readonly backend = "webgpu";
   private device: GPUDevice;
   private ctx: GPUCanvasContext;
   private canvasFmt: GPUTextureFormat;
@@ -1423,83 +1424,8 @@ export class FrameRenderer {
     }));
   }
 
-  // Resolved-param uniform bytes for an effect, or null if the type is unimplemented or multi-pass.
-  // clip-relative frame is 0 for M9B (static effect params; keyframed effect params are a later fold).
-  private effectStepData(eff: Effect, rw: number, rh: number): Float32Array<ArrayBuffer> | null {
-    switch (eff.type) {
-      case "color.saturation":
-        return new Float32Array([resolveParam(eff.params.amount, 0, 1)]);
-      case "color.exposure":
-        return new Float32Array([resolveParam(eff.params.ev, 0, 0)]);
-      case "color.contrast":
-        return new Float32Array([resolveParam(eff.params.amount, 0, 1)]);
-      case "color.highlightsShadows":
-        return new Float32Array([resolveParam(eff.params.highlights, 0, 0), resolveParam(eff.params.shadows, 0, 0)]);
-      case "color.blacksWhites":
-        return new Float32Array([resolveParam(eff.params.blacks, 0, 0), resolveParam(eff.params.whites, 0, 0)]);
-      case "color.temperature":
-        return new Float32Array([resolveParam(eff.params.temperature, 0, 6500), resolveParam(eff.params.tint, 0, 0)]);
-      case "color.vibrance":
-        return new Float32Array([resolveParam(eff.params.amount, 0, 0)]);
-      case "color.wheels":
-        return new Float32Array([
-          resolveParam(eff.params.lift_x, 0, 0),
-          resolveParam(eff.params.lift_y, 0, 0),
-          resolveParam(eff.params.lift_m, 0, 0),
-          0,
-          resolveParam(eff.params.gamma_x, 0, 0),
-          resolveParam(eff.params.gamma_y, 0, 0),
-          resolveParam(eff.params.gamma_m, 0, 1),
-          0,
-          resolveParam(eff.params.gain_x, 0, 0),
-          resolveParam(eff.params.gain_y, 0, 0),
-          resolveParam(eff.params.gain_m, 0, 1),
-          0,
-        ]);
-      case "key.chroma":
-        return new Float32Array([
-          resolveParam(eff.params.keyHue, 0, 0.333),
-          resolveParam(eff.params.tolerance, 0, 0),
-          resolveParam(eff.params.softness, 0, 0.5),
-          resolveParam(eff.params.spill, 0, 0.5),
-        ]);
-      case "stylize.invert":
-        return new Float32Array([0, 0, 0, 0]);
-      case "stylize.vignette":
-        return new Float32Array([
-          resolveParam(eff.params.amount, 0, 0),
-          resolveParam(eff.params.midpoint, 0, 0.5),
-          resolveParam(eff.params.roundness, 0, 0),
-          resolveParam(eff.params.feather, 0, 0.5),
-        ]);
-      case "stylize.grain":
-        return new Float32Array([
-          resolveParam(eff.params.amount, 0, 0),
-          resolveParam(eff.params.size, 0, 1.5),
-          rw,
-          rh,
-        ]);
-      case "blur.motion":
-        return new Float32Array([
-          resolveParam(eff.params.angle, 0, 0),
-          resolveParam(eff.params.radius, 0, 0),
-          rw,
-          rh,
-        ]);
-      default:
-        return null;
-    }
-  }
-
   private bakeCurvesLut(device: GPUDevice, curve: GradeCurve): GPUTexture {
-    const data = new Uint8Array(256 * 4);
-    for (let i = 0; i < 256; i++) {
-      const x = i / 255;
-      data[i * 4 + 0] = Math.round(evalCurve(curve.master, x) * 255);
-      data[i * 4 + 1] = Math.round(evalCurve(curve.red, x) * 255);
-      data[i * 4 + 2] = Math.round(evalCurve(curve.green, x) * 255);
-      data[i * 4 + 3] = Math.round(evalCurve(curve.blue, x) * 255);
-    }
+    const data = curvesLutData(curve);
     const tex = device.createTexture({
       size: [256, 1], format: "rgba8unorm",
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
@@ -1509,14 +1435,7 @@ export class FrameRenderer {
   }
 
   private bakeHueCurvesLut(device: GPUDevice, curves: HueCurves): GPUTexture {
-    const data = new Uint8Array(256 * 4);
-    for (let i = 0; i < 256; i++) {
-      const x = i / 255;
-      data[i * 4 + 0] = Math.round(evalHueCurve(curves.hueVsHue, x) * 255);
-      data[i * 4 + 1] = Math.round(evalHueCurve(curves.hueVsSat, x) * 255);
-      data[i * 4 + 2] = Math.round(evalHueCurve(curves.hueVsLum, x) * 255);
-      data[i * 4 + 3] = 255;
-    }
+    const data = hueCurvesLutData(curves);
     const tex = device.createTexture({
       size: [256, 1], format: "rgba8unorm",
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
@@ -1664,8 +1583,9 @@ export class FrameRenderer {
           const capBuf = uniformBuffer(bigUniform(layer, 1), UNIFORMS_F32 * 4);
           const steps: EffectStep[] = [];
           for (const eff of canonicalSort(enabledEffects)) {
-            if (eff.type === "blur.gaussian") {
-              steps.push({ type: eff.type, gaussRadius: resolveParam(eff.params.radius, 0, 8) });
+            const multi = multiPassStep(eff);
+            if (multi) {
+              steps.push(multi);
               continue;
             }
             if (eff.type === "color.curves") {
@@ -1691,29 +1611,7 @@ export class FrameRenderer {
               steps.push({ type: eff.type, lut3dTex, uBuf });
               continue;
             }
-            if (eff.type === "blur.sharpen") {
-              steps.push({ type: eff.type, sharpenAmount: resolveParam(eff.params.amount, 0, 0.4) });
-              continue;
-            }
-            if (eff.type === "blur.noiseReduction") {
-              steps.push({ type: eff.type, noiseRedAmount: resolveParam(eff.params.amount, 0, 0) });
-              continue;
-            }
-            if (eff.type === "detail.clarity") {
-              steps.push({ type: eff.type, clarityClarity: resolveParam(eff.params.clarity, 0, 0), clarityDehaze: resolveParam(eff.params.dehaze, 0, 0) });
-              continue;
-            }
-            if (eff.type === "stylize.glow") {
-              steps.push({
-                type: eff.type,
-                glowThreshold: resolveParam(eff.params.threshold, 0, 0.6),
-                glowRadius: resolveParam(eff.params.radius, 0, 20),
-                glowIntensity: resolveParam(eff.params.intensity, 0, 0),
-                glowWarmth: resolveParam(eff.params.warmth, 0, 0),
-              });
-              continue;
-            }
-            const data = this.effectStepData(eff, rw, rh);
+            const data = effectUniformData(eff, rw, rh);
             if (!data) continue; // unimplemented effect type this milestone
             steps.push({ type: eff.type, uBuf: uniformBuffer(data, Math.max(16, data.byteLength)) });
           }
@@ -2309,8 +2207,4 @@ export class FrameRenderer {
     this.accumB.destroy();
     this.device.destroy();
   }
-}
-
-export function readPixelFactory(renderer: FrameRenderer): ReadPixelFn {
-  return (x, y) => renderer.readPixel(x, y);
 }

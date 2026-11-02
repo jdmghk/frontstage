@@ -8,7 +8,8 @@ import {
 import type { MediaByteSource } from "./media/media-source.js";
 import { AudioGraph } from "./audio/audio-graph.js";
 import { AudioMixer } from "./audio/audio-mixer.js";
-import { FrameRenderer } from "./render/webgpu-renderer.js";
+import type { Renderer } from "./render/renderer.js";
+import { createRenderer } from "./render/create-renderer.js";
 import { PlayClock } from "./clock/play-clock.js";
 import { SourceCoordinator } from "./compositor/source-coordinator.js";
 
@@ -36,12 +37,12 @@ export class PlaybackEngine {
   private _lastLayerCount = 0;
   private resolveTimeline?: TimelineResolver;
 
-  private constructor(private renderer: FrameRenderer, private canvas: HTMLCanvasElement) {}
+  private constructor(private renderer: Renderer, private canvas: HTMLCanvasElement) {}
 
   get __lastLayerCount(): number { return this._lastLayerCount; }
 
   static async create(canvas: HTMLCanvasElement): Promise<PlaybackEngine> {
-    return new PlaybackEngine(await FrameRenderer.create(canvas), canvas);
+    return new PlaybackEngine(await createRenderer(canvas), canvas);
   }
 
   async load(timeline: Timeline, media: MediaByteSource): Promise<void> {
