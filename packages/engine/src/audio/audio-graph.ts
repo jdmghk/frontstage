@@ -1,11 +1,20 @@
 import type { PcmChunk } from "../decode/audio-decoder.js";
 import { SabRingBuffer } from "./ring-buffer.js";
 
-// Vite resolves the ?url import as a string at build/dev time.
-// We use a type assertion so TS doesn't choke on the query-string suffix.
+// Vite gives us the worklet's text. A `?url` import of a small file is inlined into production
+// bundles as a data: URL, which addModule rejects, so we load the text from a same-origin blob.
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore -- Vite ?url suffix not typed; resolved to string at runtime
-import workletUrl from "./ring-worklet.ts?url";
+// @ts-ignore -- Vite ?raw suffix not typed; resolved to string at build time
+import workletSource from "./ring-worklet.js?raw";
+
+async function addWorklet(ctx: AudioContext): Promise<void> {
+  const url = URL.createObjectURL(new Blob([workletSource as string], { type: "text/javascript" }));
+  try {
+    await ctx.audioWorklet.addModule(url);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
 
 export class AudioGraph {
   private constructor(
@@ -20,7 +29,7 @@ export class AudioGraph {
       throw new Error("EngineUnsupported: SharedArrayBuffer needs cross-origin isolation (COOP/COEP)");
     }
     const ctx = new AudioContext({ sampleRate });
-    await ctx.audioWorklet.addModule(workletUrl);
+    await addWorklet(ctx);
     const capacityFrames = sampleRate; // ~1s buffer
     const ring = SabRingBuffer.create(capacityFrames, channels);
     const node = new AudioWorkletNode(ctx, "ring-processor", {
