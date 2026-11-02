@@ -1,0 +1,21 @@
+{
+  "name": "@frontstage/studio-tauri",
+  "productName": "Frontstage",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:web": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@frontstage/engine": "workspace:*",
+    "@tauri-apps/api": "2.12.4"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4",
+    "@webgpu/types": "^0.1.40",
+    "typescript": "^5.5.0",
+    "vite": "^5.4.0"
+  }
+}
