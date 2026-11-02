@@ -45,7 +45,8 @@ export class VideoDecodeManager {
       ...(track.description ? { description: track.description } : {}),
       optimizeForLatency: true,
     };
-    const support = await VideoDecoder.isConfigSupported(config);
+    // WebKit throws TypeError for HEVC and AV1 config strings instead of reporting them unsupported.
+    const support = await VideoDecoder.isConfigSupported(config).catch(() => ({ supported: false }));
     if (!support.supported) throw new Error(`EngineUnsupported: codec ${track.codec}`);
     m.decoder = new VideoDecoder({
       output: (f) => {

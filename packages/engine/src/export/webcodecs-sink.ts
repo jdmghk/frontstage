@@ -102,6 +102,9 @@ export class WebCodecsMp4Sink implements ExportSink {
     });
 
     if (audio) {
+      if (typeof AudioEncoder === "undefined") {
+        throw new Error("EngineUnsupported: this browser has no AudioEncoder. Use an ffmpeg export sink.");
+      }
       this.audioError = null;
       this.audioEncoder = new AudioEncoder({
         output: (chunk, meta) => this.muxer.addAudioChunk(chunk, meta!),
@@ -127,10 +130,23 @@ export class WebCodecsMp4Sink implements ExportSink {
     }
   }
 
-  pushFrame(source: PushFrameSource): void {
-    const vf = new VideoFrame(source.offscreen, { timestamp: source.timestampUs, duration: source.durationUs });
+  pushFrame(source: PushFrameSource): void | Promise<void> {
+    // WebKit can't build a VideoFrame from an offscreen WebGL canvas ("Canvas has no frame").
+    if (source.renderer.backend === "webgl2") return this.pushReadback(source);
+    this.encodeFrame(new VideoFrame(source.offscreen, { timestamp: source.timestampUs, duration: source.durationUs }), source.keyFrame);
+  }
+
+  private async pushReadback(source: PushFrameSource): Promise<void> {
+    const rgba = await source.renderer.readRGBA();
+    this.encodeFrame(new VideoFrame(rgba as Uint8Array<ArrayBuffer>, {
+      format: "RGBA", codedWidth: this._width, codedHeight: this._height,
+      timestamp: source.timestampUs, duration: source.durationUs,
+    }), source.keyFrame);
+  }
+
+  private encodeFrame(vf: VideoFrame, keyFrame: boolean): void {
     try {
-      this.encoder.encode(vf, { keyFrame: source.keyFrame });
+      this.encoder.encode(vf, { keyFrame });
     } finally {
       vf.close();
     }

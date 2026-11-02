@@ -1,8 +1,16 @@
-import type { FrameRenderer } from "../render/webgpu-renderer.js";
+import type { Renderer } from "../render/renderer.js";
+
+export interface PushAudioPcm {
+  /** Interleaved f32. */
+  data: Float32Array;
+  timestampUs: number;
+  sampleRate: number;
+  channels: number;
+}
 
 export interface PushFrameSource {
-  offscreen: OffscreenCanvas;
-  renderer: FrameRenderer;
+  offscreen: OffscreenCanvas | HTMLCanvasElement;
+  renderer: Renderer;
   timestampUs: number;
   durationUs: number;
   keyFrame: boolean;
@@ -13,5 +21,7 @@ export interface ExportSink {
   ready(): Promise<void>;
   pushFrame(source: PushFrameSource): void | Promise<void>;
   pushAudioData(data: AudioData): void | Promise<void>;
+  /** Used where AudioData doesn't exist (WKWebView). */
+  pushAudioPcm?(pcm: PushAudioPcm): void | Promise<void>;
   finalize(): Promise<Blob | undefined>;
 }

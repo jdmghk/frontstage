@@ -2,6 +2,7 @@ import {
   type Size, type TextLayer, type TextStyle, type TextAlignment, type TextWordState, type RGBA,
   splitTextWords, DEFAULT_HIGHLIGHT_COLOR, textRasterAppearance, type TextRasterAppearance,
 } from "@frontstage/core";
+import { blurRGBA } from "./blur-rgba.js";
 
 const css = (c: RGBA): string =>
   `rgba(${Math.round(c.r * 255)},${Math.round(c.g * 255)},${Math.round(c.b * 255)},${c.a})`;
@@ -79,7 +80,9 @@ export class TextRasterizer {
 
     c.font = `${s.fontSize * s.fontScale}px ${s.fontName}`;
     c.textBaseline = "middle";
-    if (look.blurPx > 0) c.filter = `blur(${look.blurPx}px)`;
+    // WebKit has no 2D canvas filter, so blur the finished raster on the CPU there.
+    const canvasFilter = typeof c.filter === "string";
+    if (look.blurPx > 0 && canvasFilter) c.filter = `blur(${look.blurPx}px)`;
     c.save();
     c.translate(cx, cy);
     c.scale(look.widthScale, look.heightScale);
@@ -121,6 +124,11 @@ export class TextRasterizer {
       this._drawWords(c, layer, look, ws, cx, cy);
     }
     c.restore();
+    if (look.blurPx > 0 && !canvasFilter) {
+      const img = c.getImageData(0, 0, W, H);
+      blurRGBA(img.data, W, H, look.blurPx);
+      c.putImageData(img, 0, 0);
+    }
 
     const vf = new VideoFrame(o.transferToImageBitmap(), { timestamp: 0 });
     this.cache.set(key, vf);

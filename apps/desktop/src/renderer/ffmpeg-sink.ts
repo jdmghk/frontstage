@@ -1,4 +1,4 @@
-import type { ExportSink, PushFrameSource } from "@frontstage/engine";
+import type { ExportSink, PushAudioPcm, PushFrameSource } from "@frontstage/engine";
 
 export interface DesktopExportBridge {
   start(opts: { width: number; height: number; fps: number; audio?: { sampleRate: number; channels: number }; codec: string; outPath: string; subtitlesSrt?: string }): Promise<string>;
@@ -41,6 +41,11 @@ export class FfmpegIpcSink implements ExportSink {
 
   // Extract RGBA via VideoFrame.copyTo — NOT FrameRenderer.readRGBA() (packages/engine/src/render/webgpu-renderer.ts), which loses the GPU device in a sustained Electron loop.
   async pushFrame(source: PushFrameSource): Promise<void> {
+    // WebGL2 has no device to lose, and its canvas isn't reliably readable through a VideoFrame on WebKit.
+    if (source.renderer.backend === "webgl2") {
+      this.bridge.videoFrame(await source.renderer.readRGBA());
+      return;
+    }
     const rgba = new Uint8Array(this.width * this.height * 4);
     const vf = new VideoFrame(source.offscreen, { timestamp: source.timestampUs });
     try {
@@ -56,6 +61,10 @@ export class FfmpegIpcSink implements ExportSink {
     // f32 (interleaved) — all channels in plane 0, no left-channel-only reduction
     await data.copyTo(f32, { planeIndex: 0, format: "f32" });
     this.bridge.audioData(new Uint8Array(f32.buffer));
+  }
+
+  pushAudioPcm(pcm: PushAudioPcm): void {
+    this.bridge.audioData(new Uint8Array(pcm.data.buffer, pcm.data.byteOffset, pcm.data.byteLength));
   }
 
   async finalize(): Promise<undefined> {

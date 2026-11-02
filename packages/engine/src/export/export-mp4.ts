@@ -1,7 +1,7 @@
 import { timelineTotalFrames, fitShortestSide, type Timeline, type TimelineResolver } from "@frontstage/core";
 import { SourceCoordinator } from "../compositor/source-coordinator.js";
 import type { MediaByteSource } from "../media/media-source.js";
-import { FrameRenderer } from "../render/webgpu-renderer.js";
+import { createExportCanvas, createRenderer } from "../render/create-renderer.js";
 import { AudioMixer } from "../audio/audio-mixer.js";
 import type { ExportSink } from "./export-sink.js";
 import { WebCodecsMp4Sink } from "./webcodecs-sink.js";
@@ -38,8 +38,8 @@ export async function runExport(
   const frameCount = renderOpts?.frameCount ?? Math.max(0, totalFrames - startFrame);
   const includeAudio = renderOpts?.includeAudio ?? true;
 
-  const offscreen = new OffscreenCanvas(width, height);
-  const renderer = await FrameRenderer.create(offscreen);
+  const offscreen = createExportCanvas(width, height);
+  const renderer = await createRenderer(offscreen);
   const coord = await SourceCoordinator.create(timeline, media, renderOpts?.resolveTimeline);
   const mixer = includeAudio ? await AudioMixer.create(timeline, media) : undefined;
 
@@ -76,6 +76,18 @@ export async function runExport(
       let t = 0;
       while ((win = mixer.mixNext(timeline, fps))) {
         const numberOfFrames = win.length / mixer.channels;
+        if (typeof AudioData === "undefined") {
+          if (!sink.pushAudioPcm) throw new Error("EngineUnsupported: this export sink needs AudioData, which this browser lacks");
+          await sink.ready();
+          await sink.pushAudioPcm({
+            data: win,
+            timestampUs: Math.round(t * 1e6 / mixer.sampleRate),
+            sampleRate: mixer.sampleRate,
+            channels: mixer.channels,
+          });
+          t += numberOfFrames;
+          continue;
+        }
         const data = new AudioData({
           format: "f32",
           sampleRate: mixer.sampleRate,
