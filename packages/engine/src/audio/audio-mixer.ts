@@ -2,7 +2,7 @@ import { buildAudioPlan, timelineTotalFrames, type AudioPlan } from "@frontstage
 import type { Clip, Timeline } from "@frontstage/core";
 import type { MediaByteSource } from "../media/media-source.js";
 import { demuxMp4 } from "../demux/mp4-demuxer.js";
-import { buildAudioChunks, AudioDecodeManager } from "../decode/audio-decoder.js";
+import { buildAudioChunks, AudioDecodeManager, hasWebCodecsAudio } from "../decode/audio-decoder.js";
 import type { AudioGraph } from "./audio-graph.js";
 import { mixWindow, type MixSource } from "./mix.js";
 
@@ -68,8 +68,9 @@ export class AudioMixer {
     let outChannels: number | undefined;
     let outSampleRate: number | undefined;
 
+    const webCodecsAudio = hasWebCodecsAudio();
     for (const [ref, entry] of demuxCache) {
-      if (!entry.audio) continue;
+      if (!entry.audio || !webCodecsAudio) continue;
       const { bytes, audio } = entry;
       const chunks = buildAudioChunks(audio, bytes);
       let manager: AudioDecodeManager;
@@ -92,12 +93,17 @@ export class AudioMixer {
       if (outChannels === undefined) { outChannels = audio.channels; outSampleRate = audio.sampleRate; }
     }
 
-    // WebAudio fallback for refs mp4box couldn't demux. Runs after the mp4 pass so it decodes
-    // straight at the established mix format (rate via OfflineAudioContext resampling, channels
-    // conformed manually) — heterogeneous sources would otherwise throw below.
+    // WebAudio fallback for refs mp4box couldn't demux, and for every ref where WebCodecs audio is
+    // missing. Runs after the mp4 pass so it decodes straight at the established mix format (rate
+    // via OfflineAudioContext resampling, channels conformed manually) — heterogeneous sources
+    // would otherwise throw below.
     for (const [ref, entry] of demuxCache) {
-      if (entry.audio || decoded.has(ref)) continue;
-      const fb = await decodeAudioBytesFallback(entry.bytes, outSampleRate ?? 48000, outChannels);
+      if (decoded.has(ref) || (entry.audio && webCodecsAudio)) continue;
+      const fb = await decodeAudioBytesFallback(
+        entry.bytes,
+        outSampleRate ?? entry.audio?.sampleRate ?? 48000,
+        outChannels ?? entry.audio?.channels,
+      );
       if (!fb) {
         console.warn(`audio decode failed for ${ref} (unsupported container/codec), skipping`);
         continue;
@@ -196,7 +202,7 @@ export class AudioMixer {
 // those containers natively. Decodes at targetRate (OfflineAudioContext resamples) and conforms
 // the channel count (mono duplicates up; extra channels drop) so the source can join an
 // established mp4-decoded mix without tripping the heterogeneous-audio guard.
-async function decodeAudioBytesFallback(
+export async function decodeAudioBytesFallback(
   bytes: ArrayBuffer,
   targetRate: number,
   targetChannels?: number,

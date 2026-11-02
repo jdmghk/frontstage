@@ -7,6 +7,11 @@ export interface PcmChunk {
   data: Float32Array;
 }
 
+// WKWebView has VideoDecoder but no AudioDecoder or EncodedAudioChunk.
+export function hasWebCodecsAudio(): boolean {
+  return typeof AudioDecoder !== "undefined" && typeof EncodedAudioChunk !== "undefined";
+}
+
 export function buildAudioChunks(track: DemuxedAudioTrack, fileBytes: ArrayBuffer): EncodedAudioChunk[] {
   const view = new Uint8Array(fileBytes);
   return track.samples.map((s) =>

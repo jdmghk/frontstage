@@ -17,6 +17,7 @@ vi.mock("../src/demux/mp4-demuxer.js", () => ({
   })),
 }));
 vi.mock("../src/decode/audio-decoder.js", () => ({
+  hasWebCodecsAudio: vi.fn(() => true),
   buildAudioChunks: vi.fn(() => []),
   AudioDecodeManager: {
     create: vi.fn(async () => ({
@@ -223,5 +224,41 @@ describe("AudioMixer.create non-mp4 audio fallback", () => {
     expect(requestedCh).toBe(2);
     expect(mixer!.channels).toBe(2);
     expect(mixer!.sampleRate).toBe(44100);
+  });
+});
+
+// WKWebView: mp4 demuxes fine but AudioDecoder doesn't exist, so the demuxed source itself goes
+// through decodeAudioData, at the track's own rate and channel count.
+describe("AudioMixer.create without WebCodecs audio", () => {
+  beforeEach(() => { vi.unstubAllGlobals(); });
+
+  it("decodes demuxed mp4 audio with decodeAudioData, not AudioDecodeManager", async () => {
+    const { hasWebCodecsAudio, AudioDecodeManager } = await import("../src/decode/audio-decoder.js");
+    (hasWebCodecsAudio as ReturnType<typeof vi.fn>).mockReturnValue(false);
+    (AudioDecodeManager.create as ReturnType<typeof vi.fn>).mockClear();
+    const { demuxMp4 } = await import("../src/demux/mp4-demuxer.js");
+    (demuxMp4 as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      audio: { codec: "mp4a.40.2", sampleRate: 44100, channels: 2, samples: [{ cts: 0, byteOffset: 0, size: 4, isSync: true }] },
+    });
+    let requestedRate: number | undefined;
+    let requestedCh: number | undefined;
+    vi.stubGlobal("OfflineAudioContext", class {
+      constructor(ch: number, _len: number, rate: number) { requestedCh = ch; requestedRate = rate; }
+      decodeAudioData = async () => ({
+        numberOfChannels: 2, length: 2, sampleRate: 44100,
+        getChannelData: (ch: number) => new Float32Array(ch === 0 ? [0.5, 0.25] : [-0.5, -0.25]),
+      });
+    });
+    try {
+      const tl = timeline([track("a", "audio", [clip("c", "audio", { mediaRef: "m" })])]);
+      const mixer = await AudioMixer.create(tl, makeMedia(new Set(["m"])));
+      expect(AudioDecodeManager.create).not.toHaveBeenCalled();
+      expect(requestedRate).toBe(44100);
+      expect(requestedCh).toBe(2);
+      expect(mixer!.sampleRate).toBe(44100);
+      expect(mixer!.channels).toBe(2);
+    } finally {
+      (hasWebCodecsAudio as ReturnType<typeof vi.fn>).mockReturnValue(true);
+    }
   });
 });
