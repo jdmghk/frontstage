@@ -12,7 +12,7 @@ interface Row {
 test("WebGL2Renderer matches FrameRenderer on every fixture", async ({ page }) => {
   test.setTimeout(240_000);
   await page.goto("/parity.html");
-  await expect(page.locator("#status")).toHaveText("ok", { timeout: 200_000 });
+  await expect(page.locator("#status")).toHaveText("ok", { timeout: 90_000 });
   const rows = await page.evaluate(() => (window as unknown as { __parity: Row[] }).__parity);
   const info = await page.evaluate(() => (window as unknown as { __parityInfo: { factoryBackend: string; contextRestore: { overTol: number } } }).__parityInfo);
   expect(info.factoryBackend).toBe("webgpu");

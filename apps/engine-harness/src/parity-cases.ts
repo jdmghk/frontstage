@@ -116,7 +116,7 @@ function oddI420(): VideoFrame {
 }
 
 // Coded larger than visible, like 1920x1088 H.264 showing 1080 rows. The pad is red so reading it shows.
-function croppedI420(): VideoFrame | undefined {
+async function croppedI420(): Promise<VideoFrame | undefined> {
   const cw = W + 8, chh = H + 6, ccw = cw >> 1, cch = chh >> 1;
   const d = new Uint8Array(cw * chh + ccw * cch * 2);
   d.fill(81, 0, cw * chh);
@@ -132,8 +132,10 @@ function croppedI420(): VideoFrame | undefined {
     visibleRect: { x: 4, y: 2, width: W, height: H },
     colorSpace: { matrix: "bt709", primaries: "bt709", transfer: "bt709", fullRange: false },
   });
-  // WebKit's constructor drops the offset and the coded size, so the frame isn't what was asked for.
-  if (f.codedWidth === cw) return f;
+  // WebKit's constructor drops the offset and shows the pad, so the frame isn't what was asked for.
+  const first = new Uint8Array(f.allocationSize());
+  await f.copyTo(first);
+  if (first[0] === 16) return f;
   f.close();
   return undefined;
 }
@@ -243,7 +245,7 @@ export class Sources {
     try {
       s.odd = s.keep(oddI420());
     } catch { /* WebKit's VideoFrame constructor rejects odd-sized I420 */ }
-    s.cropped = croppedI420();
+    s.cropped = await croppedI420();
     if (s.cropped) s.keep(s.cropped);
     s.h264 = await decodeClipFrame();
     if (s.h264) s.frames.push(s.h264);
