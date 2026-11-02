@@ -119,7 +119,7 @@ function planesUpload(w: number, h: number) {
     const up = (i: number, pw: number, ph: number) => {
       gl.activeTexture(gl.TEXTURE0 + i);
       gl.pixelStorei(gl.UNPACK_ROW_LENGTH, layout[i]!.stride);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, pw, ph, 0, gl.RED, gl.UNSIGNED_BYTE, buf, layout[i]!.offset);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, pw, ph, 0, gl.RED, gl.UNSIGNED_BYTE, buf!, layout[i]!.offset);
     };
     up(0, W, H); up(1, W >> 1, H >> 1); up(2, W >> 1, H >> 1);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);

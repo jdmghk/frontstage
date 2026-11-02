@@ -156,6 +156,9 @@ importers:
 
   apps/studio-tauri:
     dependencies:
+      '@frontstage/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       '@frontstage/engine':
         specifier: workspace:*
         version: link:../../packages/engine

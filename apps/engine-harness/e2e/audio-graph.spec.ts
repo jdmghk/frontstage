@@ -17,3 +17,12 @@ test("audio worklet plays streamed PCM (clock advances, ring drains)", async ({ 
   expect(r.initialAvail).toBeGreaterThan(0);  // PCM was actually buffered before start
   expect(r.ringDrained).toBe(true);           // worklet consumed frames from the ring
 });
+
+test("MessagePort transport plays streamed PCM with the same public API", async ({ page }) => {
+  await page.goto("/audio-graph.html?transport=port");
+  await page.waitForFunction(() => window.__audioGraphReady === true, { timeout: 20_000 });
+  const r = await page.evaluate(() => window.__audioGraphRun!());
+  expect(r.t1 - r.t0).toBeGreaterThan(0.2);
+  expect(r.initialAvail).toBeGreaterThan(0);
+  expect(r.ringDrained).toBe(true);
+});

@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@frontstage/core": "workspace:*",
     "@frontstage/engine": "workspace:*",
     "@tauri-apps/api": "2.12.4"
   },

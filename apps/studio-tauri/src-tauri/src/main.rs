@@ -31,6 +31,16 @@ fn clip_bytes() -> Result<Response, String> {
     Ok(Response::new(bytes))
 }
 
+// Test media and parity references for phase1.ts, by bare file name under SPIKE_DIR.
+#[tauri::command]
+fn spike_file(name: String) -> Result<Response, String> {
+    if name.contains('/') || name.contains("..") {
+        return Err("bad file name".into());
+    }
+    let bytes = std::fs::read(std::path::Path::new(&env("SPIKE_DIR")?).join(name)).map_err(|e| e.to_string())?;
+    Ok(Response::new(bytes))
+}
+
 #[tauri::command]
 async fn decode_pcm() -> Result<Response, String> {
     let output = Command::new(env("SPIKE_FFMPEG")?)
@@ -114,7 +124,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            clip_bytes, decode_pcm, sink_start, sink_frame, sink_finish,
+            clip_bytes, spike_file, decode_pcm, sink_start, sink_frame, sink_finish,
             export_start, export_frame, export_finish, progress, report
         ])
         .run(tauri::generate_context!())

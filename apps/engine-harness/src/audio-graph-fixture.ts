@@ -28,7 +28,8 @@ async function main(): Promise<void> {
     const chunks = buildAudioChunks(result.audio, fileBytes);
     const mgr = await AudioDecodeManager.create(result.audio, chunks);
 
-    const graph = await AudioGraph.create(result.audio.channels, result.audio.sampleRate);
+    const transport = new URLSearchParams(location.search).get("transport") === "port" ? "port" : undefined;
+    const graph = await AudioGraph.create(result.audio.channels, result.audio.sampleRate, transport);
 
     // Push ~0.5s of PCM into the ring before starting
     const halfSecFrames = Math.ceil(result.audio.sampleRate * 0.5);
