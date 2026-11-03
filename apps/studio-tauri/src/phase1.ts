@@ -613,6 +613,134 @@ async function real1080() {
   return { ...info, meanAbs: +(sum / n).toFixed(3), bottom16RowsMeanAbs: +(bottom / bottomN).toFixed(3), pixelsOver8: over8, of: 1920 * 1080, bottomRowPixel: px, readPixelMatchesRGBA: got[(1079 * 1920 + 100) * 4] === px[0] };
 }
 
+interface RealClip {
+  name: string; group: string; W: number; H: number; pix: string;
+  marker: [number, number, number, number];
+  patches: Record<string, [number, number]>;
+  file?: string; ref?: string; tonemapRef?: string; encodeError?: string;
+}
+
+function whiteBox(rgba: Uint8Array, stride: number, W: number, H: number): number[] | null {
+  // White marker only appears in the top half; the ramp below tops out at grey.
+  let x0 = W, y0 = H, x1 = -1, y1 = -1;
+  for (let y = 0; y < H >> 1; y++) for (let x = 0; x < W; x++) {
+    const i = (y * W + x) * stride;
+    if (rgba[i]! > 200 && rgba[i + 1]! > 200 && rgba[i + 2]! > 200) {
+      if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+  }
+  return x1 < 0 ? null : [x0, y0, x1 - x0 + 1, y1 - y0 + 1];
+}
+
+function compareToRgb(got: Uint8Array, want: Uint8Array, W: number, H: number) {
+  let sum = 0, over8 = 0, max = 0;
+  for (let p = 0; p < W * H; p++) {
+    let m = 0;
+    for (let c = 0; c < 3; c++) { const d = Math.abs(got[p * 4 + c]! - want[p * 3 + c]!); sum += d; if (d > m) m = d; }
+    if (m > 8) over8++;
+    if (m > max) max = m;
+  }
+  return { meanAbs: +(sum / (W * H * 3)).toFixed(2), maxDiff: max, pctOver8: +((100 * over8) / (W * H)).toFixed(2) };
+}
+
+async function realClip(c: RealClip) {
+  const row: Record<string, unknown> = { name: c.name, group: c.group, pix: c.pix, size: `${c.W}x${c.H}` };
+  if (!c.file) return { ...row, encodeError: c.encodeError };
+  const bytes = await file(c.file);
+  const demux = await demuxMp4(new Blob([bytes]));
+  const video = demux.video!;
+  row.codec = video.codec;
+  row.demuxSize = [video.codedWidth, video.codedHeight];
+  const config: VideoDecoderConfig = { codec: video.codec, codedWidth: video.codedWidth, codedHeight: video.codedHeight, ...(video.description ? { description: video.description } : {}) };
+  try { row.configSupported = (await VideoDecoder.isConfigSupported(config)).supported; }
+  catch (e) { row.configSupported = `threw ${String(e)}`; }
+
+  // The demuxer gives no description for HEVC/AV1, so give WebKit a fair try with the real box and
+  // the usual codec strings before concluding it can't decode them.
+  if (!video.codec.startsWith("avc") && !video.codec.startsWith("vp")) {
+    const box = video.codec.startsWith("hvc") ? "hvcC" : "av1C";
+    const u8 = new Uint8Array(bytes);
+    let at = -1;
+    for (let i = 4; i < u8.length - 4 && at < 0; i++) if (String.fromCharCode(u8[i]!, u8[i + 1]!, u8[i + 2]!, u8[i + 3]!) === box) at = i;
+    const description = at < 0 ? undefined : u8.slice(at + 4, at - 4 + ((u8[at - 4]! << 24) | (u8[at - 3]! << 16) | (u8[at - 2]! << 8) | u8[at - 1]!));
+    const tries: Record<string, unknown> = { boxBytes: description?.length };
+    const strings = box === "hvcC" ? [video.codec, "hvc1.1.6.L93.B0", "hev1.1.6.L93.B0", "hvc1.2.4.L153.B0"] : [video.codec, "av01.0.04M.08"];
+    for (const codec of strings) {
+      try { tries[codec] = (await VideoDecoder.isConfigSupported({ codec, codedWidth: video.codedWidth, codedHeight: video.codedHeight, description })).supported; }
+      catch (e) { tries[codec] = `threw ${String(e)}`; }
+    }
+    row.withDescription = tries;
+  }
+
+  // Raw decoder output, separately from the engine, to see what the browser hands over.
+  if (row.configSupported === true) {
+    try {
+      const stream = new ClipStream(video.samples, new Uint8Array(bytes) as Uint8Array<ArrayBuffer>, config);
+      const f = await Promise.race([stream.next(), new Promise<never>((_, rej) => setTimeout(() => rej(new Error("no output in 20s")), 20000))]);
+      row.frame = { format: f.format, coded: [f.codedWidth, f.codedHeight], visible: f.visibleRect?.toJSON(), display: [f.displayWidth, f.displayHeight], colorSpace: f.colorSpace.toJSON() };
+      f.close();
+      stream.dispose();
+    } catch (e) { row.frame = { failed: String(e) }; }
+  }
+
+  // The engine's real path: demux, VideoDecodeManager, compositor, renderer.
+  const media: MediaByteSource = { open: async () => new Blob([bytes], { type: "video/mp4" }) };
+  const nat = { width: video.codedWidth, height: video.codedHeight };
+  const canvasSize = { width: c.W, height: c.H };
+  const clip = clipBase({ durationFrames: 30, transform: fitTransform(nat, canvasSize) });
+  const tl: Timeline = { fps: 30, width: c.W, height: c.H, settingsConfigured: true, tracks: [{ id: "v", type: "video", muted: false, hidden: false, syncLocked: false, clips: [clip] }] };
+  const canvas = hostCanvas(c.W, c.H);
+  let engine: PlaybackEngine | undefined;
+  try {
+    engine = await PlaybackEngine.create(canvas);
+    row.backend = (engine as unknown as { renderer: { backend: string } }).renderer.backend;
+    await engine.load(tl, media);
+    await engine.seek(15, "exact");
+    row.layers = engine.__lastLayerCount;
+    if (engine.__lastLayerCount === 0) { row.rejected = true; return row; }
+    const got = await engine.readRGBA();
+    row.gotBytes = got.length;
+    const want = new Uint8Array(await file(c.ref!));
+    row.expectedMarker = c.marker;
+    row.markerGot = whiteBox(got, 4, c.W, c.H);
+    row.markerRef = whiteBox(want, 3, c.W, c.H);
+    let magenta = 0;
+    for (let i = 0; i < got.length; i += 4) if (got[i]! > 180 && got[i + 1]! < 90 && got[i + 2]! > 180) magenta++;
+    row.padPixels = magenta;
+    row.vsFfmpegMatrixOnly = compareToRgb(got, want, c.W, c.H);
+    const patches: Record<string, unknown> = {};
+    for (const [name, [x, y]] of Object.entries(c.patches)) {
+      if (!["red", "green", "blue", "grey", "ramp50", "ramp140", "ramp230"].includes(name)) continue;
+      const i = (y * c.W + x) * 4, j = (y * c.W + x) * 3;
+      patches[name] = { got: [got[i], got[i + 1], got[i + 2]], ref: [want[j], want[j + 1], want[j + 2]] };
+    }
+    row.patches = patches;
+    if (c.tonemapRef) {
+      const tm = new Uint8Array(await file(c.tonemapRef));
+      row.vsFfmpegToneMapped = compareToRgb(got, tm, c.W, c.H);
+      const [x, y] = c.patches.ramp140!;
+      row.ramp140ToneMapped = [tm[(y * c.W + x) * 3], tm[(y * c.W + x) * 3 + 1], tm[(y * c.W + x) * 3 + 2]];
+    }
+  } catch (e) {
+    row.engineError = String(e);
+  } finally {
+    engine?.dispose();
+  }
+  return row;
+}
+
+async function realClips() {
+  const clips = JSON.parse(new TextDecoder().decode(await file("clips.json"))) as RealClip[];
+  const out: unknown[] = [];
+  for (const c of clips) {
+    let row: unknown;
+    try { row = await realClip(c); } catch (e) { row = { name: c.name, failed: String(e) }; }
+    out.push(row);
+    await progress(`clip ${JSON.stringify(row)}`);
+  }
+  return out;
+}
+
 function probe() {
   const out: Record<string, string> = {};
   const t = (name: string, fn: () => unknown) => {
@@ -647,6 +775,7 @@ async function factory() {
 await section("env", async () => env());
 await section("probe", async () => probe());
 await section("real_1080", real1080);
+await section("real_clips", realClips);
 await section("factory", factory);
 await section("parity", parity);
 await section("audio_decode", audioDecode);

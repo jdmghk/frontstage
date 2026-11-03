@@ -1,23 +1,22 @@
 import base from "./playwright.config";
 import { defineConfig } from "@playwright/test";
 
-// Headless Chromium has no WebGPU on this Mac, so run headed with the window off-screen.
+// The old headless shell has no WebGPU on this Mac. The "chromium" channel's new headless mode does,
+// and opens no window.
 export default defineConfig({
   ...base,
   projects: [
     {
-      name: "chromium-webgpu-offscreen",
+      name: "chromium-webgpu-headless",
       use: {
         browserName: "chromium",
         launchOptions: {
-          headless: false,
+          headless: true,
+          channel: "chromium",
           args: [
             "--enable-unsafe-webgpu",
             "--ignore-gpu-blocklist",
-            "--window-position=-2000,-2000",
-            "--window-size=400,300",
-            "--disable-backgrounding-occluded-windows",
-            "--disable-renderer-backgrounding",
+            "--use-angle=metal",
           ],
         },
       },
