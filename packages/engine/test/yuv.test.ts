@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { yuvConversion, gamutToSrgb, frameUploadKind, planeSizes, type YuvColorSpace } from "../src/render/yuv.js";
+import { yuvConversion, gamutToSrgb, frameMatrix, framePrimaries, setStreamColor, fitPlanesToLayout, frameUploadKind, planeSizes, type YuvColorSpace } from "../src/render/yuv.js";
 
 // yuv in 8-bit codes → rgb in [0,1], applying the matrix as the shader does.
 function convert(cs: YuvColorSpace | null | undefined, y: number, u: number, v: number): number[] {
@@ -96,5 +96,40 @@ describe("frame formats", () => {
     expect(planeSizes("NV12", 321, 241)).toEqual([[321, 241], [161, 121]]);
     expect(planeSizes("I422", 321, 241)).toEqual([[321, 241], [161, 241], [161, 241]]);
     expect(planeSizes("I420A", 4, 2)).toEqual([[4, 2], [2, 1], [2, 1], [4, 2]]);
+  });
+});
+
+describe("fitPlanesToLayout", () => {
+  it("keeps sizes when the layout has room, including padded strides", () => {
+    const sizes = planeSizes("I420", 640, 360);
+    const layout = [{ offset: 0, stride: 704 }, { offset: 253440, stride: 352 }, { offset: 316800, stride: 352 }];
+    expect(fitPlanesToLayout(sizes, layout, 380160, false)).toEqual(sizes);
+  });
+
+  it("follows WebKit's rounded-down chroma on odd sizes", () => {
+    const layout = [{ offset: 0, stride: 853 }, { offset: 410293, stride: 426 }, { offset: 512533, stride: 426 }];
+    expect(fitPlanesToLayout(planeSizes("I420", 853, 481), layout, 614773, false)).toEqual([[853, 481], [426, 240], [426, 240]]);
+  });
+
+  it("counts NV12 chroma stride in sample pairs", () => {
+    const layout = [{ offset: 0, stride: 640 }, { offset: 230400, stride: 640 }];
+    expect(fitPlanesToLayout(planeSizes("NV12", 640, 360), layout, 345600, true)).toEqual([[640, 360], [320, 180]]);
+  });
+});
+
+describe("stream colour override", () => {
+  const frame = (cs: { matrix?: string; primaries?: string; fullRange?: boolean }) => ({ colorSpace: cs });
+
+  it("falls back to the frame's own tags", () => {
+    const f = frame({ matrix: "bt709", primaries: "bt709", fullRange: true });
+    expect(frameMatrix(f)).toBe(f.colorSpace);
+    expect(framePrimaries(f)).toBe("bt709");
+  });
+
+  it("replaces matrix and primaries but keeps the frame's actual range", () => {
+    const f = frame({ matrix: "bt709", primaries: "bt709", fullRange: true });
+    setStreamColor(f, { matrix: "smpte170m", primaries: "smpte170m" });
+    expect(frameMatrix(f)).toEqual({ matrix: "smpte170m", fullRange: true });
+    expect(framePrimaries(f)).toBe("smpte170m");
   });
 });

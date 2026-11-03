@@ -48,6 +48,27 @@ export function yuvConversion(cs: YuvColorSpace | null | undefined): YuvConversi
   };
 }
 
+// WebKit tags every decoded frame BT.709, whatever the stream says; its planes still hold the
+// stream's own Y'CbCr. The decoder records the stream's real tags here for the renderer.
+export interface StreamColor {
+  matrix?: string;
+  primaries?: string;
+}
+const streamColors = new WeakMap<object, StreamColor>();
+
+export function setStreamColor(frame: object, color: StreamColor): void {
+  streamColors.set(frame, color);
+}
+
+export function frameMatrix(frame: { colorSpace: YuvColorSpace & { primaries?: string | null } }): YuvColorSpace {
+  const over = streamColors.get(frame);
+  return over?.matrix ? { matrix: over.matrix, fullRange: frame.colorSpace.fullRange } : frame.colorSpace;
+}
+
+export function framePrimaries(frame: { colorSpace: { primaries?: string | null } }): string | null | undefined {
+  return streamColors.get(frame)?.primaries ?? frame.colorSpace.primaries;
+}
+
 export type FrameUploadKind = "planar" | "nv12" | "rgba" | "bgra" | "fallback";
 
 export function frameUploadKind(format: string | null | undefined): FrameUploadKind {
@@ -82,6 +103,22 @@ export function planeSizes(format: string, w: number, h: number): Array<[number,
     case "NV12": return [[w, h], [cw, ch]];
     default: return [[w, h]];
   }
+}
+
+// WebKit rounds chroma down on odd sizes, in the layout copyTo returns: 853x481 gets 426x240, not
+// 427x241. Asking GL for the rounded-up size overruns the buffer, so trust the layout where it's smaller.
+export function fitPlanesToLayout(
+  sizes: Array<[number, number]>,
+  layout: ReadonlyArray<{ offset: number; stride: number }>,
+  totalBytes: number,
+  nv12: boolean,
+): Array<[number, number]> {
+  return sizes.map(([w, h], i) => {
+    const plane = layout[i]!;
+    const end = layout[i + 1]?.offset ?? totalBytes;
+    const bytesPerSample = nv12 && i === 1 ? 2 : 1;
+    return [Math.min(w, Math.floor(plane.stride / bytesPerSample)), Math.min(h, Math.floor((end - plane.offset) / plane.stride))];
+  });
 }
 
 const PRIMARIES: Record<string, [number, number, number, number, number, number]> = {

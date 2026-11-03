@@ -1,4 +1,6 @@
 import type { DemuxedTrack } from "../demux/mp4-demuxer.js";
+import { parseAvcDecoderConfig, videoProxyReason, webKitStreamColor, type AvcStreamInfo } from "./h264-sps.js";
+import { setStreamColor, type StreamColor } from "../render/yuv.js";
 
 export function buildVideoChunks(track: DemuxedTrack, fileBytes: ArrayBuffer): EncodedVideoChunk[] {
   const view = new Uint8Array(fileBytes);
@@ -12,6 +14,11 @@ export function buildVideoChunks(track: DemuxedTrack, fileBytes: ArrayBuffer): E
 }
 
 export interface EngineDecodeError { message: string; }
+
+// WKWebView's VideoDecoder. Its problems are listed in h264-sps.ts.
+function isWebKitDecoder(): boolean {
+  return typeof navigator !== "undefined" && /AppleWebKit/.test(navigator.userAgent) && !/Chrome\//.test(navigator.userAgent);
+}
 
 interface KeyframeEntry { chunkIndex: number; micros: number; }
 
@@ -34,6 +41,13 @@ export class VideoDecodeManager {
 
   static async create(track: DemuxedTrack, chunks: EncodedVideoChunk[]): Promise<VideoDecodeManager> {
     const m = new VideoDecodeManager(track, chunks);
+    let streamColor: StreamColor | null = null;
+    if (isWebKitDecoder()) {
+      const info: AvcStreamInfo | null = track.description ? parseAvcDecoderConfig(track.description) : null;
+      const reason = videoProxyReason(track.codec, info);
+      if (reason) throw new Error(`EngineUnsupported: ${reason}`);
+      streamColor = info && webKitStreamColor(info, track.codedHeight);
+    }
     m.keyframes = chunks
       .map((c, i) => ({ c, i }))
       .filter(({ c }) => c.type === "key")
@@ -50,6 +64,7 @@ export class VideoDecodeManager {
     if (!support.supported) throw new Error(`EngineUnsupported: codec ${track.codec}`);
     m.decoder = new VideoDecoder({
       output: (f) => {
+        if (streamColor) setStreamColor(f, streamColor);
         m.open++;
         if (m.mode === "pump") {
           m.buffer.push(f);

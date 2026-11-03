@@ -11,6 +11,7 @@ export * from "./render/blur-rgba.js";
 export * from "./render/composite-layer.js";
 export * from "./render/text-rasterizer.js";
 export * from "./decode/video-decoder.js";
+export * from "./decode/h264-sps.js";
 export * from "./decode/audio-decoder.js";
 export * from "./playback-engine.js";
 export * from "./clock/play-clock.js";

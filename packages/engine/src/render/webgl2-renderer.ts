@@ -3,7 +3,7 @@ import { canonicalSort, resolveParam, parseGradeCurve, parseHueCurves, BLEND_MOD
 import type { CompositeLayer } from "./composite-layer.js";
 import type { Renderer } from "./renderer.js";
 import { effectUniformData, multiPassStep, curvesLutData, hueCurvesLutData } from "./effect-params.js";
-import { yuvConversion, gamutToSrgb, frameUploadKind, planeSizes, type YuvConversion } from "./yuv.js";
+import { yuvConversion, gamutToSrgb, frameMatrix, framePrimaries, frameUploadKind, planeSizes, fitPlanesToLayout, type YuvConversion } from "./yuv.js";
 import {
   VS_FULLSCREEN, VS_CANVAS, VS_LAYER, FS_BLIT, FS_EFFECTS, FS_GAUSS, FS_CURVES, FS_HUE_CURVES, FS_LUT3D,
   FS_SHARPEN_FX2, FS_NOISE_RED_FX2, FS_CLARITY_FX2, FS_GLOW_THRESH, FS_GLOW_FX2, FS_COMPOSITE, FS_STENCIL,
@@ -260,9 +260,12 @@ export class WebGL2Renderer implements Renderer {
     const rect = frame.visibleRect!;
     const w = rect.width;
     const h = rect.height;
-    const sizes = planeSizes(format, w, h);
-    const key = `${format}:${w}x${h}`;
     let slot = this.slots[slotIndex];
+    const size = frame.allocationSize();
+    const buf = slot && slot.buf.length >= size ? slot.buf : new Uint8Array(size);
+    const layout = await frame.copyTo(buf);
+    const sizes = fitPlanesToLayout(planeSizes(format, w, h), layout, size, kind === "nv12");
+    const key = `${format}:${sizes.join("/")}`;
     if (!slot || slot.key !== key) {
       if (slot) for (const t of slot.textures) gl.deleteTexture(t);
       const textures = sizes.map(([pw, ph], i) => {
@@ -272,12 +275,10 @@ export class WebGL2Renderer implements Renderer {
         setSampling(gl, gl.LINEAR);
         return tex;
       });
-      slot = { key, textures, buf: slot?.buf ?? new Uint8Array(0) };
+      slot = { key, textures, buf };
       this.slots[slotIndex] = slot;
     }
-    const size = frame.allocationSize();
-    if (slot.buf.length < size) slot.buf = new Uint8Array(size);
-    const layout = await frame.copyTo(slot.buf);
+    slot.buf = buf;
     gl.activeTexture(gl.TEXTURE0);
     sizes.forEach(([pw, ph], i) => {
       const interleaved = kind === "nv12" && i === 1;
@@ -290,8 +291,8 @@ export class WebGL2Renderer implements Renderer {
     return {
       variant: kind,
       textures: slot.textures,
-      yuv: yuvConversion(frame.colorSpace),
-      gamut: gamutToSrgb(frame.colorSpace.primaries),
+      yuv: yuvConversion(frameMatrix(frame)),
+      gamut: gamutToSrgb(framePrimaries(frame)),
       hasAlphaPlane: format === "I420A",
     };
   }
