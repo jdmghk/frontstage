@@ -1,5 +1,6 @@
 import type { DemuxedTrack } from "../demux/mp4-demuxer.js";
 import { parseAvcDecoderConfig, videoProxyReason, webKitStreamColor, type AvcStreamInfo } from "./h264-sps.js";
+import { isWebKitEngine } from "../platform.js";
 import { setStreamColor, type StreamColor } from "../render/yuv.js";
 
 export function buildVideoChunks(track: DemuxedTrack, fileBytes: ArrayBuffer): EncodedVideoChunk[] {
@@ -15,16 +16,12 @@ export function buildVideoChunks(track: DemuxedTrack, fileBytes: ArrayBuffer): E
 
 export interface EngineDecodeError { message: string; }
 
-// WKWebView's VideoDecoder. Its problems are listed in h264-sps.ts.
-function isWebKitDecoder(): boolean {
-  return typeof navigator !== "undefined" && /AppleWebKit/.test(navigator.userAgent) && !/Chrome\//.test(navigator.userAgent);
-}
-
 const CODEC_NAMES: [string, string][] = [["hev1", "HEVC"], ["hvc1", "HEVC"], ["av01", "AV1"], ["vp09.02", "10-bit VP9"], ["vp09", "This VP9"], ["vp8", "VP8"], ["avc", "This H.264"]];
 
 /** Why this browser can't decode the track and it needs converting; null if it can. */
 export async function videoDecodeProblem(track: DemuxedTrack): Promise<string | null> {
-  if (isWebKitDecoder()) {
+  // WKWebView's VideoDecoder has the problems listed in h264-sps.ts.
+    if (isWebKitEngine()) {
     const info = track.description ? parseAvcDecoderConfig(track.description) : null;
     const reason = videoProxyReason(track.codec, info);
     if (reason) return reason;
@@ -63,7 +60,8 @@ export class VideoDecodeManager {
   static async create(track: DemuxedTrack, chunks: EncodedVideoChunk[]): Promise<VideoDecodeManager> {
     const m = new VideoDecodeManager(track, chunks);
     let streamColor: StreamColor | null = null;
-    if (isWebKitDecoder()) {
+    // WKWebView's VideoDecoder has the problems listed in h264-sps.ts.
+    if (isWebKitEngine()) {
       const info: AvcStreamInfo | null = track.description ? parseAvcDecoderConfig(track.description) : null;
       const reason = videoProxyReason(track.codec, info);
       if (reason) throw new Error(`EngineUnsupported: ${reason}`);
