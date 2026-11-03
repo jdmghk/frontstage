@@ -107,6 +107,10 @@ export async function runExport(
     }
 
     return await sink.finalize();
+  } catch (e) {
+    // The export's own error is the one worth reporting.
+    await Promise.resolve(sink.abort?.()).catch(() => {});
+    throw e;
   } finally {
     renderer.dispose();
     coord.dispose();

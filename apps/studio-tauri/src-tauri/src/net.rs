@@ -49,7 +49,7 @@ pub fn is_allowed_import_host(url: &Url) -> bool {
 // ── Private ranges ──────────────────────────────────────────────────────────
 
 pub fn is_private_ipv4(ip: Ipv4Addr) -> bool {
-    let [a, b, _, _] = ip.octets();
+    let [a, b, c, _] = ip.octets();
     a == 0                                   // 0.0.0.0/8
         || a == 127                          // loopback
         || a == 10                           // 10.0.0.0/8
@@ -57,6 +57,9 @@ pub fn is_private_ipv4(ip: Ipv4Addr) -> bool {
         || (a == 192 && b == 168)            // 192.168.0.0/16
         || (a == 169 && b == 254)            // link-local, incl. cloud metadata
         || (a == 100 && (64..=127).contains(&b)) // CGNAT
+        || (a == 192 && b == 0 && c == 0)    // IETF protocol assignments
+        || (a == 198 && (18..=19).contains(&b)) // benchmarking
+        || a >= 224                          // multicast and reserved
 }
 
 pub fn is_private_ipv6(ip: Ipv6Addr) -> bool {
@@ -65,11 +68,19 @@ pub fn is_private_ipv6(ip: Ipv6Addr) -> bool {
         let o = ip.octets();
         return is_private_ipv4(Ipv4Addr::new(o[12], o[13], o[14], o[15]));
     }
-    if ip.is_unspecified() || ip.is_loopback() {
-        return true;
+    let o = ip.octets();
+    // NAT64 and 6to4 reach the IPv4 address they embed.
+    if g[..6] == [0x64, 0xff9b, 0, 0, 0, 0] {
+        return is_private_ipv4(Ipv4Addr::new(o[12], o[13], o[14], o[15]));
     }
-    (g[0] & 0xfe00) == 0xfc00 // unique local
+    if g[0] == 0x2002 {
+        return is_private_ipv4(Ipv4Addr::new(o[2], o[3], o[4], o[5]));
+    }
+    g[..6] == [0; 6] // includes :: and ::1; the rest is deprecated IPv4-compatible
+        || (g[0] & 0xfe00) == 0xfc00 // unique local
         || (g[0] & 0xffc0) == 0xfe80 // link-local
+        || (g[0] & 0xffc0) == 0xfec0 // deprecated site-local
+        || (g[0] & 0xff00) == 0xff00 // multicast
 }
 
 pub fn is_private_address(ip: IpAddr) -> bool {
@@ -342,6 +353,7 @@ pub mod tests {
         for bad in [
             "0.0.0.0", "0.255.255.255", "127.0.0.1", "127.255.255.255", "10.0.0.0", "10.255.255.255", "172.16.0.0", "172.31.255.255", "192.168.0.0", "192.168.255.255",
             "169.254.0.0", "169.254.169.254", "169.254.255.255", "100.64.0.0", "100.127.255.255",
+            "192.0.0.1", "198.18.0.0", "198.19.255.255", "224.0.0.1", "239.255.255.255", "240.0.0.1", "255.255.255.255",
         ] {
             assert!(is_private_address(bad.parse().unwrap()), "{bad}");
         }
@@ -353,12 +365,13 @@ pub mod tests {
     #[test]
     fn every_private_ipv6_range_is_caught_including_mapped_ipv4() {
         for bad in [
-            "::", "::1", "fc00::1", "fdff:ffff::1", "fe80::1", "febf::1",
+            "::", "::1", "::2", "::7f00:1", "fc00::1", "fdff:ffff::1", "fe80::1", "febf::1", "fec0::1", "ff02::1",
+            "64:ff9b::7f00:1", "64:ff9b::a9fe:a9fe", "2002:7f00:1::1", "2002:a9fe:a9fe::1",
             "::ffff:127.0.0.1", "::ffff:10.0.0.1", "::ffff:169.254.169.254", "::ffff:192.168.1.1", "::ffff:172.16.0.1", "::ffff:100.64.0.1", "::ffff:0.0.0.0", "::ffff:7f00:1",
         ] {
             assert!(is_private_address(bad.parse().unwrap()), "{bad}");
         }
-        for ok in ["2606:4700:4700::1111", "fbff::1", "fec0::1", "::ffff:8.8.8.8", "::2"] {
+        for ok in ["2606:4700:4700::1111", "fbff::1", "::ffff:8.8.8.8", "64:ff9b::808:808", "2002:808:808::1"] {
             assert!(!is_private_address(ok.parse().unwrap()), "{ok}");
         }
     }

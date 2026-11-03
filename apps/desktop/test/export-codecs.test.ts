@@ -12,7 +12,7 @@ describe("export codecs", () => {
 
   test("the default codecs keep their previous behaviour", () => {
     expect(videoArgs(CODECS.libx264, { width: 1280, height: 720, fps: 24 }, "/o.mp4")).toEqual([
-      "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", "1280x720", "-r", "24", "-i", "pipe:0", "-c:v", "libx264", "-pix_fmt", "yuv420p", "/o.mp4",
+      "-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", "1280x720", "-r", "24", "-i", "pipe:0", "-vf", "scale=out_color_matrix=bt709", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-c:v", "libx264", "-pix_fmt", "yuv420p", "/o.mp4",
     ]);
     expect(muxArgs(CODECS.libx264, { sampleRate: 48000, channels: 2 }, "/v", "/a", "/o").join(" ")).toBe(
       "-y -i /v -f f32le -ar 48000 -ac 2 -i /a -map 0:v -map 1:a -c:v copy -c:a aac -shortest /o",

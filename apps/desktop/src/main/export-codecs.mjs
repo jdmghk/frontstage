@@ -13,8 +13,12 @@ export const CODECS = {
   },
 };
 
+// Frames arrive as sRGB RGBA. Without this ffmpeg converts with BT.601 and writes no tags, so players
+// and YouTube, which assume BT.709 for HD, show shifted colours.
+const COLOR_ARGS = ["-vf", "scale=out_color_matrix=bt709", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709"];
+
 export function videoArgs(spec, { width, height, fps }, outPath) {
-  return ["-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${width}x${height}`, "-r", String(fps), "-i", "pipe:0", ...spec.vargs, outPath];
+  return ["-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", `${width}x${height}`, "-r", String(fps), "-i", "pipe:0", ...COLOR_ARGS, ...spec.vargs, outPath];
 }
 
 /**

@@ -7,6 +7,8 @@ export interface DesktopExportBridge {
   videoFrame(buf: Uint8Array): void | Promise<void>;
   audioData(buf: Uint8Array): void | Promise<void>;
   finish(): Promise<string>;
+  /** Tauri only. Electron's main process has no such channel, so its behaviour stays as it was. */
+  abort?(): Promise<void>;
 }
 
 export interface FfmpegIpcSinkOptions {
@@ -67,6 +69,10 @@ export class FfmpegIpcSink implements ExportSink {
 
   async pushAudioPcm(pcm: PushAudioPcm): Promise<void> {
     await this.bridge.audioData(new Uint8Array(pcm.data.buffer, pcm.data.byteOffset, pcm.data.byteLength));
+  }
+
+  async abort(): Promise<void> {
+    await this.bridge.abort?.();
   }
 
   async finalize(): Promise<undefined> {

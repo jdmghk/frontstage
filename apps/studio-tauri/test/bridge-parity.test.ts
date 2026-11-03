@@ -51,7 +51,9 @@ describe("bridge against preload", () => {
   for (const [name, methods] of Object.entries(preloadShape(true))) {
     if (name === "__e2eMenuTrigger") continue;
     test(`${name} has every preload method`, () => {
-      expect(new Set(got[name])).toEqual(new Set(methods));
+      // Export abort has no Electron channel; a failed export there keeps its existing behaviour.
+      const tauriOnly = new Set(["abort"]);
+      expect(new Set((got[name] ?? []).filter((m: string) => !tauriOnly.has(m)))).toEqual(new Set(methods));
     });
   }
 

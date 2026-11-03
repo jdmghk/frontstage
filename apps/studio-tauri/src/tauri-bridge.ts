@@ -55,6 +55,11 @@ const desktopExport = {
   },
   videoFrame: (buf: Uint8Array) => exportEnqueue(() => invoke("export_video_frame", buf)),
   audioData: (buf: Uint8Array) => exportEnqueue(() => invoke("export_audio_data", buf)),
+  abort: async () => {
+    await exportChain;
+    exportFailure = null;
+    await invoke("export_session_abort");
+  },
   finish: async () => {
     await exportChain;
     const failure = exportFailure;

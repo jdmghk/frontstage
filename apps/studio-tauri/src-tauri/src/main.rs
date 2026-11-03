@@ -288,7 +288,7 @@ macro_rules! handlers_with {
             project::project_pick_open, project::project_pick_save_as, project::project_pick_export_save, project::project_set_next_pick,
             project::project_set_next_export_pick, project::project_authorize_path,
             projects::projects_list, projects::projects_resolve, projects::projects_create, projects::projects_upsert, projects::projects_cleanup_failed_create,
-            export::export_session_start, export::export_video_frame, export::export_audio_data, export::export_session_finish,
+            export::export_session_start, export::export_session_abort, export::export_video_frame, export::export_audio_data, export::export_session_finish,
             ai::ai_set_key, ai::ai_has_key, ai::ai_clear_key, ai::ai_generate_image, ai::ai_stream_chat,
             gen::gen_fal_submit, gen::gen_fal_status, gen::gen_fal_download, gen::gen_fal_upload,
             media::media_extract_audio_path, media::media_extract_audio_bytes, media::media_read_timecode, media::media_import_scan,

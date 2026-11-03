@@ -41,12 +41,17 @@ pub fn codec(name: &str) -> Option<CodecSpec> {
 }
 
 /// `readRGBA` is already top-down, so there's no vflip here.
+// Frames arrive as sRGB RGBA. Without this ffmpeg converts with BT.601 and writes no tags, so players
+// and YouTube, which assume BT.709 for HD, show shifted colours.
+const COLOR_ARGS: [&str; 8] = ["-vf", "scale=out_color_matrix=bt709", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709"];
+
 pub fn video_args(spec: &CodecSpec, width: u32, height: u32, fps: f64, out: &str) -> Vec<String> {
     let mut v: Vec<String> = ["-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s"].map(String::from).to_vec();
     v.push(format!("{width}x{height}"));
     v.push("-r".into());
     v.push(fps.to_string());
     v.extend(["-i".to_string(), "pipe:0".to_string()]);
+    v.extend(COLOR_ARGS.iter().map(|s| s.to_string()));
     v.extend(spec.vargs.iter().map(|s| s.to_string()));
     v.push(out.to_string());
     v
@@ -124,7 +129,6 @@ struct Session {
 #[derive(Default)]
 pub struct Exports {
     active: Mutex<Option<Session>>,
-    counter: AtomicU64,
 }
 
 fn collect_stderr(child: &mut Child) -> (Arc<Mutex<String>>, Option<JoinHandle<()>>) {
@@ -157,6 +161,9 @@ fn remove_temps(paths: &[Option<&Path>]) {
     }
 }
 
+// Per process, not per session store: temp names must never collide.
+static EXPORT_COUNTER: AtomicU64 = AtomicU64::new(0);
+
 impl Exports {
     pub fn start(&self, auth: &Authorized, ffmpeg: Option<PathBuf>, o: StartOpts) -> Result<String, String> {
         let mut active = self.active.lock().unwrap();
@@ -178,7 +185,7 @@ impl Exports {
         }
         let srt_text = o.subtitles_srt.as_deref().filter(|s| !s.is_empty());
         let needs_mux = o.audio.is_some() || srt_text.is_some();
-        let n = self.counter.fetch_add(1, Ordering::SeqCst) + 1;
+        let n = EXPORT_COUNTER.fetch_add(1, Ordering::SeqCst) + 1;
         let id = n.to_string();
         // The pid keeps two running apps from sharing temp names.
         let tmp = std::env::temp_dir();
@@ -246,6 +253,21 @@ impl Exports {
             Some(f) => f.write_all(data).map_err(|e| e.to_string()),
             None => Ok(()),
         }
+    }
+
+    /// Ends a session the renderer gave up on, so a failed export can't block the next one. ffmpeg is
+    /// killed rather than left to finish: its stdin would otherwise wait for frames that never come.
+    pub fn abort(&self) {
+        let Some(mut s) = self.active.lock().unwrap().take() else { return };
+        drop(s.stdin.take());
+        let _ = s.child.kill();
+        let _ = s.child.wait();
+        if let Some(t) = s.stderr_thread.take() {
+            let _ = t.join();
+        }
+        drop(s.audio_file.take());
+        // Without a mux pass video_only is the output path, and it only holds a partial file.
+        remove_temps(&[Some(s.video_only.as_path()), s.audio_path.as_deref(), s.srt_path.as_deref()]);
     }
 
     pub fn finish(&self) -> Result<String, String> {
@@ -316,6 +338,12 @@ pub async fn export_audio_data(request: Request<'_>, ctx: State<'_, Ctx>) -> Res
 }
 
 #[tauri::command]
+pub async fn export_session_abort(ctx: State<'_, Ctx>) -> Result<(), String> {
+    ctx.exports.abort();
+    Ok(())
+}
+
+#[tauri::command]
 pub async fn export_session_finish(ctx: State<'_, Ctx>) -> Result<String, String> {
     blocking(|| ctx.exports.finish())
 }
@@ -345,7 +373,7 @@ mod tests {
     #[test]
     fn default_codecs_keep_their_previous_arguments() {
         let spec = codec("libx264").unwrap();
-        assert_eq!(video_args(&spec, 1280, 720, 24.0, "/o.mp4"), ["-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", "1280x720", "-r", "24", "-i", "pipe:0", "-c:v", "libx264", "-pix_fmt", "yuv420p", "/o.mp4"]);
+        assert_eq!(video_args(&spec, 1280, 720, 24.0, "/o.mp4"), ["-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", "1280x720", "-r", "24", "-i", "pipe:0", "-vf", "scale=out_color_matrix=bt709", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-c:v", "libx264", "-pix_fmt", "yuv420p", "/o.mp4"]);
         assert_eq!(joined(&mux_args(&spec, Some(AudioFormat { sample_rate: 48000, channels: 2 }), "/v", Some("/a"), "/o", None)), "-y -i /v -f f32le -ar 48000 -ac 2 -i /a -map 0:v -map 1:a -c:v copy -c:a aac -shortest /o");
     }
 
@@ -442,6 +470,62 @@ mod tests {
         let info = Command::new(&bin).args(["-hide_banner", "-i", out.to_str().unwrap()]).output().unwrap();
         let text = String::from_utf8_lossy(&info.stderr);
         assert!(text.contains("Video: h264") && text.contains("Audio: aac") && text.contains("Subtitle: mov_text"), "{text}");
+    }
+
+    #[test]
+    fn abort_kills_ffmpeg_removes_partial_files_and_frees_the_session() {
+        let Some(bin) = crate::tools::Tools::locate().ffmpeg() else {
+            eprintln!("SKIPPED: no ffmpeg");
+            return;
+        };
+        let d = TempDir::new("export-abort");
+        let a = Authorized::default();
+        a.add(d.path());
+        let x = Exports::default();
+        x.abort(); // nothing active: no-op
+        let out = d.path().join("o.mp4");
+        let start = |x: &Exports| x.start(&a, Some(bin.clone()), StartOpts { width: 64, height: 64, ..opts(out.to_str().unwrap()) });
+        start(&x).unwrap();
+        x.video_frame(&[0u8; 64 * 64 * 4]).unwrap();
+        assert!(start(&x).unwrap_err().contains("already in progress"));
+        x.abort();
+        assert!(!out.exists());
+        assert_eq!(x.video_frame(&[0u8; 64 * 64 * 4]).unwrap_err(), "no active export session");
+        start(&x).unwrap();
+        x.video_frame(&[0u8; 64 * 64 * 4]).unwrap();
+        x.finish().unwrap();
+        assert!(out.exists());
+    }
+
+    // Y of (200,30,30) is 73 under BT.709 and 85 under BT.601; tags must survive the mux's stream copy.
+    #[test]
+    fn youtube_export_is_bt709_and_tagged_after_the_mux() {
+        let Some(bin) = crate::tools::Tools::locate().ffmpeg() else {
+            eprintln!("SKIPPED: no ffmpeg");
+            return;
+        };
+        let d = TempDir::new("export-color");
+        let a = Authorized::default();
+        a.add(d.path());
+        let x = Exports::default();
+        let out = d.path().join("o.mp4");
+        x.start(&a, Some(bin.clone()), StartOpts {
+            width: 64, height: 64, codec: "libx264_youtube".into(),
+            audio: Some(AudioFormat { sample_rate: 48000, channels: 2 }),
+            ..opts(out.to_str().unwrap())
+        }).unwrap();
+        let frame: Vec<u8> = [200u8, 30, 30, 255].repeat(64 * 64);
+        for _ in 0..3 {
+            x.video_frame(&frame).unwrap();
+        }
+        x.audio_data(&[0u8; 48000]).unwrap();
+        x.finish().unwrap();
+        let o = Command::new(&bin).args(["-v", "error", "-i", out.to_str().unwrap(), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "yuv420p", "pipe:1"]).output().unwrap();
+        let y = o.stdout[64 * 32 + 32] as i32;
+        assert!((y - 73).abs() <= 2, "Y {y}");
+        let info = Command::new(&bin).args(["-hide_banner", "-i", out.to_str().unwrap()]).output().unwrap();
+        let text = String::from_utf8_lossy(&info.stderr);
+        assert!(text.contains("bt709"), "{text}");
     }
 
     #[test]

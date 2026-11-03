@@ -215,3 +215,15 @@ and web apps. Dev builds weren't affected. Fixed by loading plain JS through a s
 - The fixture now waits for the audio clock to advance (up to 15 s) instead of a fixed 350 ms.
 - Midtones: WebKit keeps matching ffmpeg. Chromium's hardware-decode lift (128 to 139) stays a known difference.
 - Still open for Phase 4: re-measure fps in a visible window on a quiet machine. Outside load was 40-360 during review.
+
+## Phase 2 review notes
+- Exports were BT.601 with no colour tags, in Electron too. For (200,30,30) at 1080p, Y was 85 where BT.709 needs 73, and
+  players assume BT.709 for HD. Both apps now convert with BT.709 and tag it. A cargo test checks Y and the tags after the mux.
+- `smoke.sh` now prints b51a1c for the red band. That's its own readback (`scale` to rgb24 decoding BT.709 as BT.601):
+  c2291b encoded as BT.709 and decoded as BT.601 works out to (181,26,29). The earlier c2291b vs c91e1e difference is the gamut step for
+  SD video (SMPTE 170M to BT.709 of c91e1e computes to c42a1d).
+- A failed Tauri export now aborts its session (kills ffmpeg, removes partial files). Electron has no such channel and keeps
+  its existing behaviour, including "already in progress" after a failure.
+- The Rust SSRF check is now stricter than Electron's: it also covers 192.0.0.0/24, 198.18.0.0/15, multicast and reserved
+  IPv4, NAT64 and 6to4 embedded IPv4, IPv4-compatible IPv6, site-local and multicast IPv6. Electron's list is unchanged.
+

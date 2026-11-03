@@ -24,4 +24,6 @@ export interface ExportSink {
   /** Used where AudioData doesn't exist (WKWebView). */
   pushAudioPcm?(pcm: PushAudioPcm): void | Promise<void>;
   finalize(): Promise<Blob | undefined>;
+  /** Called when the export fails before finalize finishes. Must be safe to call after finalize. */
+  abort?(): void | Promise<void>;
 }
