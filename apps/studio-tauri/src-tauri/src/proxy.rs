@@ -80,13 +80,14 @@ fn parse_clock(s: &str) -> Option<f64> {
 /// Near-transparent and fast enough to wait for; export renders from this, so quality matters more
 /// than size. x264 needs even dimensions, so odd sources lose their last row or column. Timestamps
 /// pass through, keeping variable frame rates and the clip's duration. SDR keeps the source's colour
-/// tags, which the engine reads; only tone-mapped HDR becomes BT.709.
+/// tags, which the engine reads; only tone-mapped HDR becomes BT.709. Full-range sources become limited
+/// range: ffmpeg 6 did that by itself on `format=yuv420p`, ffmpeg 7 would keep them full.
 pub fn proxy_args(input: &str, output: &str, hdr: bool) -> Vec<String> {
     let even = "crop=trunc(iw/2)*2:trunc(ih/2)*2";
     let filter = if hdr {
         format!("{even},zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,format=yuv420p")
     } else {
-        format!("{even},format=yuv420p")
+        format!("{even},scale=out_range=tv,format=yuv420p")
     };
     let mut a: Vec<String> = ["-y", "-hide_banner", "-nostats", "-progress", "pipe:1", "-i", input, "-map", "0:v:0", "-map", "0:a:0?", "-vf"].map(String::from).to_vec();
     a.push(filter);

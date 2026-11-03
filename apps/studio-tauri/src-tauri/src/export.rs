@@ -43,8 +43,9 @@ pub fn codec(name: &str) -> Option<CodecSpec> {
 
 /// `readRGBA` is already top-down, so there's no vflip here.
 // Frames arrive as sRGB RGBA. Without this ffmpeg converts with BT.601 and writes no tags, so players
-// and YouTube, which assume BT.709 for HD, show shifted colours.
-const COLOR_ARGS: [&str; 8] = ["-vf", "scale=out_color_matrix=bt709", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709"];
+// and YouTube, which assume BT.709 for HD, show shifted colours. The tags are set in the filter because
+// ffmpeg 7 takes them from the frames and ignores -color_primaries and -color_trc on the encoder.
+const COLOR_ARGS: [&str; 2] = ["-vf", "scale=out_color_matrix=bt709,setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709"];
 
 pub fn video_args(spec: &CodecSpec, width: u32, height: u32, fps: f64, out: &str) -> Vec<String> {
     let mut v: Vec<String> = ["-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s"].map(String::from).to_vec();
@@ -375,7 +376,7 @@ mod tests {
     #[test]
     fn default_codecs_keep_their_previous_arguments() {
         let spec = codec("libx264").unwrap();
-        assert_eq!(video_args(&spec, 1280, 720, 24.0, "/o.mp4"), ["-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", "1280x720", "-r", "24", "-i", "pipe:0", "-vf", "scale=out_color_matrix=bt709", "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-c:v", "libx264", "-pix_fmt", "yuv420p", "/o.mp4"]);
+        assert_eq!(video_args(&spec, 1280, 720, 24.0, "/o.mp4"), ["-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", "1280x720", "-r", "24", "-i", "pipe:0", "-vf", "scale=out_color_matrix=bt709,setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709", "-c:v", "libx264", "-pix_fmt", "yuv420p", "/o.mp4"]);
         assert_eq!(joined(&mux_args(&spec, Some(AudioFormat { sample_rate: 48000, channels: 2 }), "/v", Some("/a"), "/o", None)), "-y -i /v -f f32le -ar 48000 -ac 2 -i /a -map 0:v -map 1:a -c:v copy -c:a aac -shortest /o");
     }
 
@@ -530,7 +531,8 @@ mod tests {
         assert!((y - 73).abs() <= 2, "Y {y}");
         let info = Command::new(&check).args(["-hide_banner", "-i", out.to_str().unwrap()]).output().unwrap();
         let text = String::from_utf8_lossy(&info.stderr);
-        assert!(text.contains("bt709"), "{text}");
+        // All three tags: "bt709/unknown/unknown" is what ffmpeg 7 wrote with encoder options alone.
+        assert!(text.contains("yuv420p(tv, bt709, progressive)"), "{text}");
     }
 
     #[test]
