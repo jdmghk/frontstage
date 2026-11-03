@@ -188,8 +188,8 @@ for (const c of opts.clips.slice(1)) {
 await step("original_kept_and_proxy_after_reopen", async () => {
   const hevc = opts.clips.find((c) => c.name === "hevc")!;
   const entry = lib().getSnapshot().entries.find((e) => e.name === hevc.file)!;
-  fire("save");
-  await until("saved", () => !session().isDirty());
+  await invoke("smoke_menu", { id: "save" });
+  await until("saved through the menu event", () => !session().isDirty());
   const rel = entry.source.relativePath;
   const saved = (await dp().readMedia!(projectDir, rel)) as Uint8Array;
   const source = new Uint8Array(await file(hevc.file));

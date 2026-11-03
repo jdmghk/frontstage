@@ -311,7 +311,7 @@ macro_rules! handlers_with {
 fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
     handlers_with!(
         spike::clip_bytes, spike::spike_file, spike::decode_pcm, spike::sink_start, spike::sink_frame, spike::sink_finish,
-        spike::export_start, spike::export_frame, spike::export_finish, spike::progress, spike::report, spike::smoke_js_dialog_log, spike::smoke_mcp_probe,
+        spike::export_start, spike::export_frame, spike::export_finish, spike::progress, spike::report, spike::smoke_js_dialog_log, spike::smoke_mcp_probe, spike::smoke_menu,
     )
 }
 

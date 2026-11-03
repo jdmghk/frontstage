@@ -143,6 +143,65 @@ audio underruns in either.
 
 Test media comes from `apps/studio-tauri/scripts/gen-clips.py`; none of it is committed.
 
+## Phase 2 results
+
+`apps/studio-tauri` now runs the real editor from `apps/desktop/src/renderer` on `tauri://`. Electron's main process is
+Rust modules in `src-tauri/src`, and `src/tauri-bridge.ts` exposes the same `window.desktop*` objects as the preload.
+
+| Size, macOS x64 | |
+|---|---|
+| Release binary before (Phase 1 shell with its test pages) | 9.03 MB |
+| Release binary now, with the full editor UI | 9.28 MB |
+| `Frontstage.app` now, without ffmpeg | 9.0 MB |
+| ffmpeg and ffprobe, not bundled until Phase 3 | 78.9 MB and 62.2 MB |
+
+Until Phase 3, a release app needs both binaries copied into `Frontstage.app/Contents/MacOS/`. Without them, export and
+conversion fail with "ffmpeg not found beside the app". Debug and test builds use the ones in `apps/desktop/node_modules`.
+
+The UI adds so little because onnxruntime's 21.6 MB wasm is left out of the bundle: transformers.js always sets its
+`wasmPaths` to the CDN, so the copy Vite adds is never loaded.
+
+### Dependencies
+
+Each is justified in `src-tauri/Cargo.toml`. Tauri's default features are off. `ureq` replaces `reqwest` from the plan: it's
+smaller, uses the OS TLS stack through native-tls, and has a resolver hook for DNS pinning. That hook is outside ureq's
+semver promise, so ureq is pinned exactly. `tiny_http` serves MCP and the OAuth redirect. `rfd` replaces the dialog plugin.
+
+### Tests
+
+- `cargo test` in `src-tauri`. Mock HTTP only; a real Keychain round trip under a throwaway service name; real ffmpeg
+  and the official MCP SDK when the repo's `node_modules` are installed.
+- `test/bridge-parity.test.ts` compares the bridge with the preload and with the registered Rust commands.
+- `scripts/smoke.sh` drives the real editor in a hidden WKWebView, in a test build:
+  `VITE_TEST_PAGES=1 pnpm build:web`, `cargo build --features webkit-tests`, then `scripts/smoke.sh <scratch-dir>`.
+
+`desktop-interop-export` and `desktop-project-nav` stay in vitest. They test renderer TypeScript that this app runs
+unchanged, so a Rust copy would test nothing the app uses. Their Rust halves have their own cargo tests.
+
+The test pages and spike commands exist only with `--features webkit-tests` and `VITE_TEST_PAGES=1`.
+
+### H.264 conversion
+
+Clips the webview can't decode (`videoDecodeProblem`) are converted when imported, or when first read after a reopen. The
+proxy is in the app's cache, named from the source's content. The manifest and the project's media file don't change, and
+uploads and interchange exports still use the original. Preview and export read the proxy, so an export of such a clip is
+a generation further from the source (CRF 16, preset veryfast). The cache isn't size-limited yet.
+
+### Behaviour that differs from Electron
+
+- Morphic sign-in sends and checks an OAuth `state`. Electron sent none. Not yet tried against the real server.
+- fal and Morphic result downloads go through the SSRF guard. Electron's fal download had no guard.
+- Claude's text after a mid-stream fallback block is the answer. Electron joined it to the declined model's partial text,
+  which could never parse.
+- The local MCP server answers with `application/json` and returns 405 to GET and DELETE. Electron's SDK server answered
+  with SSE. Both are allowed by the spec, and the official client works against it.
+- Long secrets are split across several entries, because Windows limits each to 2560 bytes.
+- Keys, Morphic sign-in, recents, the MCP token and window state start empty: this app has its own data folder and
+  Keychain service. Keys can't be carried over, so a notice asks the user to re-enter them.
+- The macOS menu has its own app menu, so File no longer appears under the app's name. Force Reload and Toggle DevTools
+  are gone.
+- wry doesn't implement `alert`, `confirm` or `prompt`, which silently answered no. `js_dialogs.rs` adds them on macOS.
+
 ## Bug found along the way
 `ring-worklet.ts?url` was inlined into production bundles as a raw TypeScript `data:` URL, which
 `addModule` rejects, so the engine's audio graph failed to start in production builds of the desktop

@@ -3,7 +3,10 @@
   "productName": "Frontstage",
   "version": "0.3.0",
   "identifier": "studio.frontstage.tauri",
-  "build": { "frontendDist": "../dist" },
+  "build": {
+    "beforeBuildCommand": "pnpm build:web",
+    "frontendDist": "../dist"
+  },
   "app": {
     "windows": [],
     "security": {
@@ -21,7 +24,9 @@
         "frame-src": "'none'",
         "form-action": "'none'"
       },
-      "dangerousDisableAssetCspModification": ["style-src"],
+      "dangerousDisableAssetCspModification": [
+        "style-src"
+      ],
       "headers": {
         "Cross-Origin-Opener-Policy": "same-origin",
         "Cross-Origin-Embedder-Policy": "require-corp"
@@ -30,8 +35,16 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
-    "icon": ["icons/icon.icns", "icons/icon.png"],
-    "macOS": { "minimumSystemVersion": "13.0" }
+    "targets": [
+      "app",
+      "dmg"
+    ],
+    "icon": [
+      "icons/icon.icns",
+      "icons/icon.png"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "13.0"
+    }
   }
 }

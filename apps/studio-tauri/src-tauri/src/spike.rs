@@ -111,6 +111,13 @@ pub fn smoke_js_dialog_log() -> Vec<String> {
     return vec![];
 }
 
+/// Runs a native menu item's handler, so the event really crosses from Rust to the renderer. Clicking
+/// the item itself needs a person.
+#[tauri::command]
+pub fn smoke_menu(id: String, app: tauri::AppHandle) {
+    crate::menu::handle(&app, &id);
+}
+
 /// Stands in for the user approving in a browser, against the mock OAuth server only.
 pub fn fake_browser(url: &str) -> Result<(), String> {
     let u = url::Url::parse(url).map_err(|e| e.to_string())?;

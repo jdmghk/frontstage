@@ -459,6 +459,14 @@ pub mod tests {
     }
 
     #[test]
+    fn provider_downloads_return_the_bytes_and_report_http_errors() {
+        let m = mock(|s| if s.url == "/ok" { Reply::new(200, vec![7u8; 11]) } else { Reply::new(403, "denied") });
+        let net = FakeNet::new(m.port, &[("a.example", &["93.184.216.1"])]);
+        assert_eq!(guarded_download(&net, "http://a.example/ok").unwrap(), vec![7u8; 11]);
+        assert_eq!(guarded_download(&net, "http://a.example/no").unwrap_err(), "403 denied");
+    }
+
+    #[test]
     fn provider_downloads_are_refused_for_internal_targets() {
         let net = FakeNet::new(1, &[("internal.evil", &["192.168.1.1"])]);
         assert_eq!(guarded_download(&net, "http://internal.evil/x").unwrap_err(), "url host not allowed");
