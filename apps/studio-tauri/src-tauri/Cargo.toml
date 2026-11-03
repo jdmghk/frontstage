@@ -4,12 +4,57 @@ version = "0.3.0"
 edition = "2021"
 rust-version = "1.77"
 
+[features]
+# Everything needed for automated WKWebView runs: the Phase 0/1 commands and pages, the smoke hook,
+# the hidden Accessory mode and env-var paths. Never enabled for a shipped build.
+webkit-tests = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
-serde_json = "1"
+# Shell. Default features off: drops dynamic-acl and x11-only extras. "compression" keeps the embedded
+# UI brotli-compressed, which shrinks the binary far more than the decoder adds.
+tauri = { version = "2", default-features = false, features = ["wry", "compression", "common-controls-v6"] }
+# Already in tauri's tree. preserve_order keeps JSON schemas and MCP tool lists in the renderer's order.
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+# Already in tauri's tree. block_in_place keeps blocking IPC off the runtime's few workers.
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread"] }
+# Already in tauri's tree.
+url = "2"
+# Already in tauri's tree. Registry ids (v4).
+uuid = { version = "1", features = ["v4"] }
+# Blocking HTTP client, chosen over reqwest (hyper, h2, tower). Uses the OS TLS stack through
+# native-tls, so there's no second TLS implementation; its resolver hook does the SSRF pinning.
+ureq = { version = "=3.5.1", default-features = false, features = ["native-tls"] }
+# Small HTTP/1.1 server for MCP and the OAuth loopback. Handles chunked and multi-read bodies, the
+# framing bug a hand-written parser had in the Swift app, with no async runtime.
+tiny_http = "0.12"
+# PKCE S256 and the proxy cache key.
+sha2 = "0.10"
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
+# State and PKCE verifier randomness, MCP token and nonces.
+getrandom = "0.3"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Keychain. A thin wrapper over the OS API.
+keyring = { version = "3", default-features = false, features = ["apple-native"] }
+# Native dialogs. Default features off (gtk on Linux only).
+rfd = { version = "0.15", default-features = false }
+# All already in tauri's tree: the JS confirm/prompt/alert panels wry doesn't implement.
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSGeometry", "NSThread"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSAlert", "NSApplication", "NSControl", "NSResponder", "NSTextField", "NSView", "NSRunningApplication"] }
+objc2-web-kit = { version = "0.3", default-features = false, features = ["std", "WKWebView", "WKUIDelegate", "WKFrameInfo", "objc2-app-kit"] }
+block2 = "0.6"
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3", default-features = false, features = ["windows-native"] }
+rfd = { version = "0.15", default-features = false, features = ["common-controls-v6"] }
+
+[target.'cfg(not(any(target_os = "macos", windows)))'.dependencies]
+rfd = { version = "0.15", default-features = false, features = ["gtk3"] }
 
 [profile.release]
 opt-level = "s"
