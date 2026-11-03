@@ -19,7 +19,7 @@ rm -rf $RUN; mkdir -p $RUN/media $RUN/out $RUN/electron
 # Top half red, bottom half blue, so a flipped or blank frame can't pass; a 440 Hz tone.
 SRC=(-f lavfi -i "color=c=0xC81E1E:s=320x180:r=30:d=1.5,drawbox=x=0:y=90:w=320:h=90:color=0x1E1EC8:t=fill" -f lavfi -i "sine=frequency=440:sample_rate=48000:duration=1.5")
 gen() { name=$1; shift; $FF -y -v error $SRC "$@" -shortest $RUN/media/$name </dev/null; }
-gen plain.mp4 -c:v libx264 -pix_fmt yuv420p -c:a aac
+gen plain.mp4 -c:v libx264 -pix_fmt yuv420p -c:a aac -timecode 01:00:00:00
 gen h264-10bit.mp4 -c:v libx264 -profile:v high10 -pix_fmt yuv420p10le -c:a aac
 gen h264-444.mp4 -c:v libx264 -profile:v high444 -pix_fmt yuv444p -c:a aac
 gen hevc.mp4 -c:v libx265 -tag:v hvc1 -x265-params log-level=error -pix_fmt yuv420p -c:a aac
@@ -52,7 +52,7 @@ PORT=$(<$RUN/mock.port)
 BASE=http://127.0.0.1:$PORT
 echo "mock on $BASE"
 
-export FRONTSTAGE_TEST_DIR=$RUN FRONTSTAGE_TEST_KEYCHAIN_SERVICE=$SERVICE FRONTSTAGE_TEST_MCP_PORT=19799 \
+export FRONTSTAGE_TEST_DIR=$RUN FRONTSTAGE_TEST_KEYCHAIN_SERVICE=$SERVICE FRONTSTAGE_TEST_MCP_PORT=$(python3 -c "import socket;s=socket.socket();s.bind(('127.0.0.1',0));print(s.getsockname()[1])") \
   SPIKE_DIR=$RUN/media SPIKE_OUT=$RUN/result.json \
   OPENROUTER_BASE_URL=$BASE FRONTSTAGE_TEST_ANTHROPIC_BASE=$BASE FRONTSTAGE_TEST_FAL_BASE=$BASE FRONTSTAGE_TEST_MORPHIC_URL=$BASE/mcp
 $ROOT/apps/studio-tauri/src-tauri/target/$PROFILE/frontstage > $RUN/app.log 2>&1 &
@@ -74,9 +74,23 @@ check() {
   for band in "crop=320:60:0:10" "crop=320:60:0:110"; do
     $FF -v error -i $f -frames:v 1 -vf "$band,scale=1:1" -f rawvideo -pix_fmt rgb24 pipe:1 </dev/null | xxd -p | tr '\n' ' '
   done
-  echo " <- $1 top bottom (want c81e1e, 1e1ec8)"
+  echo " <- $1 top bottom (red over blue)"
 }
-for c in plain h264-10bit h264-444 h264-crop hevc av1 vp9-10bit; do check $c.mp4; done
+echo -n "source plain.mp4, same measure: "
+for band in "crop=320:60:0:10" "crop=320:60:0:110"; do
+  $FF -v error -i $RUN/media/plain.mp4 -frames:v 1 -vf "$band,scale=1:1" -f rawvideo -pix_fmt rgb24 pipe:1 </dev/null | xxd -p | tr '\n' ' '
+done; echo
+for c in plain h264-10bit h264-444 h264-crop hevc av1 vp9-10bit hevc-reopened; do check $c.mp4; done
+tone() {
+  echo -n "$1 audio: "
+  $FF -v error -i $RUN/$1 -vn -ac 1 -ar 48000 -f f32le pipe:1 </dev/null | python3 -c "
+import sys,array,math
+a=array.array('f');a.frombytes(sys.stdin.buffer.read())
+z=sum(1 for i in range(1,len(a)) if (a[i-1]<0)!=(a[i]<0))
+print(round(z/2/(len(a)/48000)),'Hz,',round(len(a)/48000,2),'s, peak',round(max(map(abs,a)),3),'rms',round(math.sqrt(sum(x*x for x in a)/len(a)),4))"
+}
+tone media/plain.mp4
+tone out/plain.mp4
 echo '--- original project files unchanged in the project'
 ls $RUN/project/media 2>/dev/null | head
 echo '--- flow pack'; ls $RUN/out/Pack 2>/dev/null

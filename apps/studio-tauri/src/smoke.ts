@@ -66,42 +66,33 @@ async function importClip(c: Clip) {
   return until(`import of ${c.file}`, () => lib().getSnapshot().entries.find((e) => !before.has(e.id) && e.generationStatus === undefined));
 }
 
-function timelineWith(mediaRef: string, W: number, H: number, frames: number) {
+function timelineWith(mediaRef: string, W: number, H: number, frames: number, withAudio = false) {
+  const clip = (type: "video" | "audio") => ({
+    id: `c-${type}`,
+    mediaRef,
+    mediaType: type,
+    sourceClipType: "video",
+    startFrame: 0,
+    durationFrames: frames,
+    trimStartFrame: 0,
+    trimEndFrame: 0,
+    speed: 1,
+    volume: 1,
+    fadeInFrames: 0,
+    fadeOutFrames: 0,
+    fadeInInterpolation: "linear",
+    fadeOutInterpolation: "linear",
+    opacity: 1,
+    transform: { centerX: 0.5, centerY: 0.5, width: 1, height: 1, rotation: 0, flipHorizontal: false, flipVertical: false },
+    crop: { left: 0, top: 0, right: 0, bottom: 0 },
+  });
+  const track = (type: "video" | "audio") => ({ id: `t-${type}`, type, muted: false, hidden: false, syncLocked: false, clips: [clip(type)] });
   return {
     fps: 30,
     width: W,
     height: H,
     settingsConfigured: true,
-    tracks: [
-      {
-        id: "t",
-        type: "video",
-        muted: false,
-        hidden: false,
-        syncLocked: false,
-        clips: [
-          {
-            id: "c",
-            mediaRef,
-            mediaType: "video",
-            sourceClipType: "video",
-            startFrame: 0,
-            durationFrames: frames,
-            trimStartFrame: 0,
-            trimEndFrame: 0,
-            speed: 1,
-            volume: 1,
-            fadeInFrames: 0,
-            fadeOutFrames: 0,
-            fadeInInterpolation: "linear",
-            fadeOutInterpolation: "linear",
-            opacity: 1,
-            transform: { centerX: 0.5, centerY: 0.5, width: 1, height: 1, rotation: 0, flipHorizontal: false, flipVertical: false },
-            crop: { left: 0, top: 0, right: 0, bottom: 0 },
-          },
-        ],
-      },
-    ],
+    tracks: withAudio ? [track("video"), track("audio")] : [track("video")],
   };
 }
 
@@ -133,7 +124,7 @@ await step("editor_mounted", () => until("top bar", () => q("top-bar-title")?.te
 await step("import_clip", async () => {
   const plain = opts.clips[0]!;
   const e = await importClip(plain);
-  store().load(timelineWith(e.id, plain.w, plain.h, 45));
+  store().load(timelineWith(e.id, plain.w, plain.h, 45, true));
   return { id: e.id, rel: e.source.relativePath, hasAudio: e.hasAudio, width: e.sourceWidth };
 });
 
@@ -191,6 +182,29 @@ for (const c of opts.clips.slice(1)) {
     return { manifestRel, messages: [...seenMessages], failed, ...ex };
   });
 }
+
+// The project still holds the source's own bytes, and the same clip reaches the proxy again by path
+// after a reopen, instead of by in-memory bytes.
+await step("original_kept_and_proxy_after_reopen", async () => {
+  const hevc = opts.clips.find((c) => c.name === "hevc")!;
+  const entry = lib().getSnapshot().entries.find((e) => e.name === hevc.file)!;
+  fire("save");
+  await until("saved", () => !session().isDirty());
+  const rel = entry.source.relativePath;
+  const saved = (await dp().readMedia!(projectDir, rel)) as Uint8Array;
+  const source = new Uint8Array(await file(hevc.file));
+  const identical = saved.length === source.length && saved.every((b, i) => b === source[i]);
+  fire("new");
+  await until("new project", () => !session().getState().ref);
+  await dp().__setNextPick!(projectDir);
+  fire("open");
+  await until("reopened", () => session().getState().ref?.path === projectDir);
+  await until("media loaded", () => lib().getSnapshot().entries.some((e) => e.source.relativePath === rel));
+  const after = lib().getSnapshot().entries.find((e) => e.source.relativePath === rel)!;
+  store().load(timelineWith(after.id, hevc.w, hevc.h, 15));
+  await exportTo(`${opts.dir}/out/hevc-reopened.mp4`);
+  return { rel, identical, bytes: saved.length, sourceWidth: after.sourceWidth };
+});
 
 // ── Every other channel, through the real bridge ──
 await step("project_negative", async () => {

@@ -12,8 +12,11 @@ use block2::Block;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, Bool, Imp, ProtocolObject, Sel};
 use objc2::{sel, MainThreadMarker};
+#[cfg(not(feature = "webkit-tests"))]
 use objc2_app_kit::{NSAlert, NSTextField};
-use objc2_foundation::{NSRect, NSPoint, NSSize, NSString};
+#[cfg(not(feature = "webkit-tests"))]
+use objc2_foundation::{NSPoint, NSRect, NSSize};
+use objc2_foundation::NSString;
 use objc2_web_kit::{WKUIDelegate, WKWebView};
 
 #[cfg(feature = "webkit-tests")]
@@ -26,6 +29,7 @@ pub mod scripted {
     }
 }
 
+#[cfg(not(feature = "webkit-tests"))]
 fn alert(message: &NSString, mtm: MainThreadMarker, buttons: &[&str], field: Option<&NSTextField>) -> isize {
     let a = NSAlert::new(mtm);
     a.setMessageText(message);
@@ -39,6 +43,7 @@ fn alert(message: &NSString, mtm: MainThreadMarker, buttons: &[&str], field: Opt
 }
 
 // NSAlertFirstButtonReturn.
+#[cfg(not(feature = "webkit-tests"))]
 const FIRST_BUTTON: isize = 1000;
 
 unsafe extern "C-unwind" fn run_alert(_this: *mut AnyObject, _cmd: Sel, _wv: *mut AnyObject, message: NonNull<NSString>, _frame: *mut AnyObject, done: NonNull<Block<dyn Fn()>>) {

@@ -51,7 +51,7 @@ export function attachVideoProxy(library: MediaLibrary, projectDir: () => string
       const key = await started;
       onProgress.delete(update);
       notice.remove();
-      await fillMissingMetadata(entry, key);
+      await correctMetadata(entry, key);
       showNotice("video-proxy-done", `“${name}” was converted to H.264 to play here. Preview and export use the converted copy. The project still uses your original file.`).dismissAfter(8000);
       return { key };
     } catch (e) {
@@ -62,10 +62,9 @@ export function attachVideoProxy(library: MediaLibrary, projectDir: () => string
     }
   }
 
-  // WebKit's <video> can't read some of these clips either (AV1 on this Mac), so the import probe
-  // falls back to placeholder values. The proxy has the same picture, so read them from it.
-  async function fillMissingMetadata(entry: MediaManifestEntry, key: string): Promise<void> {
-    if (entry.sourceWidth !== undefined) return;
+  // WebKit's <video> misreads these clips: AV1 and HEVC can fail its probe, leaving placeholder
+  // values, and a left/top-cropped clip reports its padded size. The proxy has the true picture.
+  async function correctMetadata(entry: MediaManifestEntry, key: string): Promise<void> {
     try {
       const blob = new Blob([await invoke<ArrayBuffer>("media_proxy_read", { key })], { type: "video/mp4" });
       const p = await probeMediaBlob(blob, "video");

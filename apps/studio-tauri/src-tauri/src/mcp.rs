@@ -163,7 +163,7 @@ pub struct Server {
 impl Server {
     /// Binds 127.0.0.1 only, never 0.0.0.0.
     pub fn start(port: u16, token: String, bridge: Arc<dyn Bridge>) -> Result<Server, String> {
-        let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("couldn't start the MCP server on port {port}: {e}"))?;
+        let listener = bind_loopback(port).map_err(|e| format!("couldn't start the MCP server on port {port}: {e}"))?;
         let http = Arc::new(tiny_http::Server::from_listener(listener, None).map_err(|e| e.to_string())?);
         let stop = Arc::new(AtomicBool::new(false));
         let (h, s) = (http.clone(), stop.clone());
@@ -183,6 +183,22 @@ impl Server {
         self.http.unblock();
         if let Some(t) = self.thread.take() {
             let _ = t.join();
+        }
+    }
+}
+
+/// tiny_http's accept thread lets go of the socket shortly after close() returns, so rebinding at once
+/// (regenerating the token, toggling the server) can briefly find the port still in use. A port some
+/// other program holds is reported after this short wait.
+fn bind_loopback(port: u16) -> std::io::Result<TcpListener> {
+    let mut tries = 0;
+    loop {
+        match TcpListener::bind(("127.0.0.1", port)) {
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && tries < 40 => {
+                tries += 1;
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            other => return other,
         }
     }
 }
@@ -714,6 +730,17 @@ mod tests {
         assert!(e.contains("couldn't start the MCP server"), "{e}");
         server.close();
         Server::start(port, "t".into(), echo).unwrap().close();
+    }
+
+    // Found by the WKWebView smoke run: regenerating the token rebinds straight after closing.
+    #[test]
+    fn restarting_on_the_same_port_at_once_always_works() {
+        let (mut server, port, echo) = start();
+        for _ in 0..25 {
+            server.close();
+            server = Server::start(port, "t".into(), echo.clone()).unwrap();
+        }
+        server.close();
     }
 
     // ── Bridge ──
