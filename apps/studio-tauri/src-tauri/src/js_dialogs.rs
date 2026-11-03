@@ -11,7 +11,9 @@ use std::ptr::NonNull;
 use block2::Block;
 use objc2::rc::Retained;
 use objc2::runtime::{AnyClass, AnyObject, Bool, Imp, ProtocolObject, Sel};
-use objc2::{sel, MainThreadMarker};
+use objc2::sel;
+#[cfg(not(feature = "webkit-tests"))]
+use objc2::MainThreadMarker;
 #[cfg(not(feature = "webkit-tests"))]
 use objc2_app_kit::{NSAlert, NSTextField};
 #[cfg(not(feature = "webkit-tests"))]

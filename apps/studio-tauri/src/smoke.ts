@@ -385,11 +385,17 @@ await step("mcp_through_the_real_renderer", async () => {
   const m = w.desktopMcp as unknown as Record<string, (...x: unknown[]) => Promise<Record<string, unknown>>>;
   const before = await m.getStatus!();
   const on = await m.setEnabled!(true);
-  const probe = await invoke("smoke_mcp_probe", { projectDir });
+  // A folder nothing has authorised: reading it is refused until a live MCP tool call opens it,
+  // which is the nonce path. The bridge has no other way to authorise without a picker.
+  const other = `${opts.dir}/media`;
+  const readable = async () => dp().readText!(other, "smoke-plan.json").then(() => "readable", (e) => String(e));
+  const beforeOpen = await readable();
+  const probe = await invoke("smoke_mcp_probe", { projectDir: other });
+  const afterOpen = await readable();
   const oldToken = (await m.getStatus!()).token;
   const newToken = await m.regenerateToken!();
   const off = await m.setEnabled!(false);
-  return { before: { enabled: before.enabled, url: before.url }, on, probe, tokenChanged: oldToken !== (newToken as unknown as string), off };
+  return { before: { enabled: before.enabled, url: before.url }, on, probe, beforeOpen, afterOpen, tokenChanged: oldToken !== (newToken as unknown as string), off };
 });
 
 await step("js_dialogs", async () => {
