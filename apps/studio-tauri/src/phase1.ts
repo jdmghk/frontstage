@@ -564,7 +564,13 @@ async function fpsRun(clip: ArrayBuffer, rw: number, rh: number, layers: number,
 async function fps() {
   const clip1080 = await file("clip1080.mp4");
   const clip540 = await file("clip540.mp4");
-  const out: Record<string, unknown> = {};
+  // Says whether the numbers below can be read as on-screen ones: a hidden or occluded window throttles.
+  const page = { start: document.visibilityState, focus: document.hasFocus(), rafCalls: 0, rafPerSec: 0, end: "" };
+  const rafStart = performance.now();
+  let rafOn = true;
+  const rafTick = () => { if (!rafOn) return; page.rafCalls++; requestAnimationFrame(rafTick); };
+  requestAnimationFrame(rafTick);
+  const out: Record<string, unknown> = { page };
   const FRAMES = 90;
   await fpsRun(clip540, 960, 540, 1, false, 30); // warm-up, discarded: the first run after page load is slow
   const matrix: Array<[string, ArrayBuffer, number, number]> = [
@@ -580,7 +586,41 @@ async function fps() {
       await progress(`fps ${key}: ${JSON.stringify(out[key])}`);
     }
   }
+  rafOn = false;
+  page.end = document.visibilityState;
+  page.rafPerSec = +(page.rafCalls / ((performance.now() - rafStart) / 1000)).toFixed(1);
   return out;
+}
+
+// A full 1080p YouTube export through the real desktop sink and ffmpeg, for comparing the apps. The same
+// page runs in both: the Tauri bridge here, the real preload over the driver's HTTP origin in Electron.
+// Asked for by name (?only=export_speed&out=<path>), since it writes a file and takes minutes.
+async function exportSpeed() {
+  const outPath = new URLSearchParams(location.search).get("out");
+  if (!outPath) throw new Error("no out= path");
+  if (onTauri) await import("./tauri-bridge.js");
+  const host = window as unknown as {
+    desktopExport: ConstructorParameters<typeof FfmpegIpcSink>[0];
+    desktopProject: { __setNextExportPick(p: string): Promise<void>; pickExportSave(name: string): Promise<string | null> };
+  };
+  // The app only accepts an output path that came through its picker.
+  await host.desktopProject.__setNextExportPick(outPath);
+  const picked = await host.desktopProject.pickExportSave("out.mp4");
+  const bytes = await file("clip1080.mp4");
+  const media: MediaByteSource = { open: async () => new Blob([bytes], { type: "video/mp4" }) };
+  const FRAMES = 300;
+  const video = clipBase({ durationFrames: FRAMES, linkGroupId: "l", transform: fitTransform({ width: 1920, height: 1080 }, { width: 1920, height: 1080 }) });
+  const tl: Timeline = {
+    fps: 30, width: 1920, height: 1080, settingsConfigured: true,
+    tracks: [
+      { id: "v", type: "video", muted: false, hidden: false, syncLocked: false, clips: [video] },
+      { id: "a", type: "audio", muted: false, hidden: false, syncLocked: false, clips: [{ ...video, id: "ca", mediaType: "audio" }] },
+    ],
+  };
+  const t0 = performance.now();
+  await runExport(tl, media, new FfmpegIpcSink(host.desktopExport, { codec: "libx264_youtube", outPath }));
+  const secs = (performance.now() - t0) / 1000;
+  return { picked, frames: FRAMES, secs: +secs.toFixed(1), fps: +(FRAMES / secs).toFixed(2), visibility: document.visibilityState };
 }
 
 // A real 1080p decode against ffmpeg's conversion of the same frame: geometry, range and matrix end
@@ -784,5 +824,6 @@ await section("audio_preferred", () => audioGraphRun(preferredAudioTransport()))
 await section("export_paths", exportPaths);
 await section("playback", playback);
 await section("fps", fps);
+if (only?.includes("export_speed")) await section("export_speed", exportSpeed);
 if (onTauri) await invoke("report", { json: JSON.stringify(results, null, 1) });
 else await fetch("/report", { method: "POST", body: JSON.stringify(results, null, 1) });
