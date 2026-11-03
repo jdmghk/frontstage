@@ -1,132 +1,321 @@
-// Phase 0 spike: minimal commands the webview needs to prove playback, audio and export on WebKit.
-// Paths come from env vars because this binary is only run by the spike driver.
+// The Rust shell: runs the editor UI from apps/desktop/src/renderer on tauri://, with the same
+// window.desktop* objects as the Electron preload (see ../src/tauri-bridge.ts).
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::io::Write;
-use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
-use tauri::ipc::{InvokeBody, Request, Response};
-use tauri::Manager;
+mod ai;
+mod characters;
+mod claude;
+mod dialogs;
+mod export;
+mod frames;
+mod gen;
+mod js_dialogs;
+mod mcp;
+mod media;
+mod menu;
+mod morphic;
+mod net;
+mod project;
+mod projects;
+mod proxy;
+mod secrets;
+mod shell;
+mod skills;
+mod spike;
+mod studio;
+mod tools;
+mod util;
 
-#[derive(Default)]
-struct State {
-    sink_bytes: Mutex<u64>,
-    export: Mutex<Option<Child>>,
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use tauri::webview::NewWindowResponse;
+use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+
+pub struct Ctx {
+    pub user_data: PathBuf,
+    pub cache: PathBuf,
+    pub documents: PathBuf,
+    pub home: PathBuf,
+    pub electron_user_data: PathBuf,
+    pub auth: project::Authorized,
+    pub nonces: Arc<mcp::NonceGuard>,
+    pub secrets: Arc<secrets::SecretStore>,
+    pub exports: export::Exports,
+    pub proxies: proxy::Proxies,
+    pub tools: tools::Tools,
+    pub fal: gen::FalBases,
+    pub net: Box<dyn net::Net>,
+    pub mcp: mcp::McpState,
+    pub morphic: morphic::Morphic,
+    pub test_picks: project::TestPicks,
 }
 
-fn env(name: &str) -> Result<String, String> {
-    std::env::var(name).map_err(|_| format!("{name} not set"))
-}
-
-fn body<'a>(request: &'a Request<'_>) -> Result<&'a [u8], String> {
-    match request.body() {
-        InvokeBody::Raw(b) => Ok(b),
-        InvokeBody::Json(_) => Err("expected a raw binary body, got JSON".into()),
+impl Ctx {
+    pub fn test_picks_flow(&self) -> Option<String> {
+        self.test_picks.take_project()
     }
 }
 
-#[tauri::command]
-fn clip_bytes() -> Result<Response, String> {
-    let bytes = std::fs::read(env("SPIKE_CLIP")?).map_err(|e| e.to_string())?;
-    Ok(Response::new(bytes))
+/// True for a test run that must stay hidden and use throwaway locations.
+fn test_mode() -> bool {
+    cfg!(feature = "webkit-tests") && std::env::var_os("FRONTSTAGE_TEST_DIR").is_some()
 }
 
-// Test media and parity references for phase1.ts, by bare file name under SPIKE_DIR.
-#[tauri::command]
-fn spike_file(name: String) -> Result<Response, String> {
-    if name.contains('/') || name.contains("..") {
-        return Err("bad file name".into());
+struct Dirs {
+    user_data: PathBuf,
+    cache: PathBuf,
+    documents: PathBuf,
+    home: PathBuf,
+    electron_user_data: PathBuf,
+}
+
+fn dirs(app: &tauri::App) -> tauri::Result<Dirs> {
+    if test_mode() {
+        if let Some(root) = std::env::var_os("FRONTSTAGE_TEST_DIR").map(PathBuf::from) {
+            return Ok(Dirs { user_data: root.join("data"), cache: root.join("cache"), documents: root.join("docs"), home: root.join("home"), electron_user_data: root.join("electron") });
+        }
     }
-    let bytes = std::fs::read(std::path::Path::new(&env("SPIKE_DIR")?).join(name)).map_err(|e| e.to_string())?;
-    Ok(Response::new(bytes))
+    let p = app.path();
+    let user_data = p.app_data_dir()?;
+    let electron_user_data = p.data_dir()?.join("Frontstage");
+    Ok(Dirs { user_data, cache: p.app_cache_dir()?, documents: p.document_dir()?, home: p.home_dir()?, electron_user_data })
 }
 
-#[tauri::command]
-async fn decode_pcm() -> Result<Response, String> {
-    let output = Command::new(env("SPIKE_FFMPEG")?)
-        .args(["-v", "error", "-i", &env("SPIKE_CLIP")?, "-vn", "-f", "f32le", "-ac", "2", "-ar", "48000", "pipe:1"])
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).into_owned());
+fn secret_store() -> Arc<secrets::SecretStore> {
+    #[cfg(feature = "webkit-tests")]
+    if test_mode() {
+        // Real Keychain calls under a service name only test runs use, when one is given.
+        let raw: Box<dyn secrets::RawStore> = match std::env::var("FRONTSTAGE_TEST_KEYCHAIN_SERVICE") {
+            Ok(service) if service.starts_with("studio.frontstage.test") => Box::new(secrets::OsStore::new(service)),
+            _ => Box::new(secrets::MemoryStore::default()),
+        };
+        return Arc::new(secrets::SecretStore::new(raw));
     }
-    Ok(Response::new(output.stdout))
+    Arc::new(secrets::SecretStore::new(Box::new(secrets::OsStore::new(secrets::SERVICE))))
 }
 
-#[tauri::command]
-fn sink_start(state: tauri::State<State>) {
-    *state.sink_bytes.lock().unwrap() = 0;
+fn mcp_port() -> u16 {
+    #[cfg(feature = "webkit-tests")]
+    if let Some(p) = std::env::var("FRONTSTAGE_TEST_MCP_PORT").ok().and_then(|p| p.parse().ok()) {
+        return p;
+    }
+    mcp::DEFAULT_PORT
 }
 
-#[tauri::command]
-fn sink_frame(request: Request, state: tauri::State<State>) -> Result<(), String> {
-    *state.sink_bytes.lock().unwrap() += body(&request)?.len() as u64;
-    Ok(())
+fn fal_bases() -> gen::FalBases {
+    #[cfg(feature = "webkit-tests")]
+    if let Ok(b) = std::env::var("FRONTSTAGE_TEST_FAL_BASE") {
+        return gen::FalBases { queue: b.clone(), rest: b };
+    }
+    gen::FalBases::default()
 }
 
-#[tauri::command]
-fn sink_finish(state: tauri::State<State>) -> u64 {
-    *state.sink_bytes.lock().unwrap()
+fn morphic_client(store: Arc<secrets::SecretStore>) -> morphic::Morphic {
+    let tokens = Arc::new(morphic::KeychainTokens(store));
+    #[cfg(feature = "webkit-tests")]
+    if let Ok(server) = std::env::var("FRONTSTAGE_TEST_MORPHIC_URL") {
+        return morphic::Morphic::with_config(&server, morphic::CLIENT_METADATA_URL, morphic::REDIRECT_PORT, std::time::Duration::from_secs(30), tokens, Box::new(spike::fake_browser));
+    }
+    morphic::Morphic::new(tokens, Box::new(|u| shell::open_url(u)))
 }
 
-#[tauri::command]
-fn export_start(width: u32, height: u32, fps: u32, state: tauri::State<State>) -> Result<String, String> {
-    let out = env("SPIKE_EXPORT")?;
-    // Same arguments as libx264_youtube in apps/desktop/src/main/export-codecs.mjs, plus vflip because
-    // WebGL readPixels returns rows bottom-up.
-    let child = Command::new(env("SPIKE_FFMPEG")?)
-        .args(["-y", "-v", "error", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", &format!("{width}x{height}"), "-r", &fps.to_string(), "-i", "pipe:0"])
-        .args(["-vf", "vflip", "-c:v", "libx264", "-preset", "slow", "-crf", "18", "-profile:v", "high", "-pix_fmt", "yuv420p", "-movflags", "+faststart", &out])
-        .stdin(Stdio::piped())
-        .spawn()
-        .map_err(|e| e.to_string())?;
-    *state.export.lock().unwrap() = Some(child);
-    Ok(out)
+/// Default window bounds, or the saved ones. Port of loadWindowState.
+fn load_window_state(user_data: &Path) -> (Option<(f64, f64)>, (f64, f64)) {
+    let parsed: Option<serde_json::Value> = std::fs::read(user_data.join("window-state.json")).ok().and_then(|b| serde_json::from_slice(&b).ok());
+    let num = |k: &str| parsed.as_ref().and_then(|v| v.get(k)).and_then(serde_json::Value::as_f64);
+    match (num("x"), num("y"), num("width"), num("height")) {
+        (Some(x), Some(y), Some(w), Some(h)) => (Some((x, y)), (w, h)),
+        _ => (None, (1280.0, 800.0)),
+    }
 }
 
-#[tauri::command]
-async fn export_frame(request: Request<'_>, state: tauri::State<'_, State>) -> Result<(), String> {
-    let mut guard = state.export.lock().unwrap();
-    let child = guard.as_mut().ok_or("export not started")?;
-    child.stdin.as_mut().ok_or("no stdin")?.write_all(body(&request)?).map_err(|e| e.to_string())
+fn save_window_state(window: &tauri::Window, user_data: &Path, force: bool) {
+    // A drag or resize fires continuously. Electron debounced by 300 ms; a throttle keeps it simple.
+    static LAST: std::sync::Mutex<Option<std::time::Instant>> = std::sync::Mutex::new(None);
+    {
+        let mut last = LAST.lock().unwrap();
+        if !force && last.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(300)) {
+            return;
+        }
+        *last = Some(std::time::Instant::now());
+    }
+    let (Ok(pos), Ok(size), Ok(scale)) = (window.outer_position(), window.inner_size(), window.scale_factor()) else { return };
+    let v = serde_json::json!({ "x": f64::from(pos.x) / scale, "y": f64::from(pos.y) / scale, "width": f64::from(size.width) / scale, "height": f64::from(size.height) / scale });
+    let _ = std::fs::create_dir_all(user_data);
+    let _ = std::fs::write(user_data.join("window-state.json"), v.to_string());
 }
 
-#[tauri::command]
-async fn export_finish(state: tauri::State<'_, State>) -> Result<(), String> {
-    let mut child = state.export.lock().unwrap().take().ok_or("export not started")?;
-    drop(child.stdin.take());
-    let status = child.wait().map_err(|e| e.to_string())?;
-    if status.success() { Ok(()) } else { Err(format!("ffmpeg exited with {status}")) }
+/// The page stays on the app's own origin (tauri://localhost, or http://tauri.localhost on Windows).
+fn allowed_navigation(url: &url::Url) -> bool {
+    match url.scheme() {
+        "tauri" => url.host_str() == Some("localhost"),
+        "http" | "https" => url.host_str() == Some("tauri.localhost"),
+        "blob" | "about" => true,
+        _ => false,
+    }
 }
 
-#[tauri::command]
-fn progress(name: String, value: String) {
-    println!("[{name}] {value}");
-}
+fn create_window(app: &tauri::App, user_data: &Path) -> tauri::Result<()> {
+    let hidden = test_mode();
+    let (pos, (w, h)) = load_window_state(user_data);
+    #[cfg(feature = "webkit-tests")]
+    let entry = std::env::var("FRONTSTAGE_TEST_PAGE").unwrap_or_else(|_| "editor.html".to_string());
+    #[cfg(not(feature = "webkit-tests"))]
+    let entry = "editor.html".to_string();
+    let mut b = WebviewWindowBuilder::new(app, "main", WebviewUrl::App(entry.into()))
+        .title("Frontstage")
+        .inner_size(w, h)
+        .visible(!hidden)
+        .focused(!hidden)
+        // Tauri's native drop handler would swallow the HTML5 drag events the editor relies on.
+        .disable_drag_drop_handler()
+        .on_navigation(|url| {
+            if cfg!(feature = "webkit-tests") && std::env::var_os("SPIKE_URL").is_some() {
+                return true;
+            }
+            allowed_navigation(url)
+        })
+        // Electron opened target=_blank links in a window of their own; here they go to the browser.
+        .on_new_window(|url, _| {
+            if shell::is_openable_url(&url) && !cfg!(feature = "webkit-tests") {
+                let _ = shell::open_url(url.as_str());
+            }
+            NewWindowResponse::Deny
+        });
+    if let Some((x, y)) = pos {
+        b = b.position(x, y);
+    }
+    if hidden {
+        b = b.initialization_script("window.__FRONTSTAGE_SMOKE__ = true;");
+    }
+    let window = b.build()?;
+    #[cfg(target_os = "macos")]
+    js_dialogs::install(&window)?;
 
-#[tauri::command]
-fn report(json: String, app: tauri::AppHandle) -> Result<(), String> {
-    std::fs::write(env("SPIKE_OUT")?, json).map_err(|e| e.to_string())?;
-    app.exit(0);
+    #[cfg(feature = "webkit-tests")]
+    if let Ok(url) = std::env::var("SPIKE_URL") {
+        window.navigate(url.parse().expect("bad SPIKE_URL"))?;
+    }
+    let _ = &window;
     Ok(())
 }
 
 fn main() {
-    tauri::Builder::default()
-        .manage(State::default())
+    let builder = tauri::Builder::default();
+    #[cfg(feature = "webkit-tests")]
+    let builder = builder.manage(spike::SpikeState::default());
+    builder
         .setup(|app| {
             #[cfg(target_os = "macos")]
-            app.set_activation_policy(tauri::ActivationPolicy::Accessory);
-            // Spike only: lets the driver load the bench page from a loopback server.
-            if let (Ok(url), Some(window)) = (std::env::var("SPIKE_URL"), app.get_webview_window("main")) {
-                window.navigate(url.parse().expect("bad SPIKE_URL"))?;
+            app.set_activation_policy(if test_mode() { tauri::ActivationPolicy::Accessory } else { tauri::ActivationPolicy::Regular });
+
+            let d = dirs(app)?;
+            std::fs::create_dir_all(&d.user_data)?;
+            let store = secret_store();
+            let nonces = Arc::new(mcp::NonceGuard::default());
+            let mcp_state = mcp::McpState::new(&d.user_data, mcp_port()).map_err(std::io::Error::other)?;
+            *mcp_state.bridge.lock().unwrap() = Some(mcp::renderer_bridge(app.handle().clone(), nonces.clone()));
+            let morphic = morphic_client(store.clone());
+            let ctx = Ctx {
+                user_data: d.user_data.clone(),
+                cache: d.cache,
+                documents: d.documents,
+                home: d.home,
+                electron_user_data: d.electron_user_data,
+                auth: project::Authorized::default(),
+                nonces,
+                secrets: store,
+                exports: export::Exports::default(),
+                proxies: proxy::Proxies::default(),
+                tools: tools::Tools::locate(),
+                fal: fal_bases(),
+                net: Box::new(net::SystemNet),
+                mcp: mcp_state,
+                morphic,
+                test_picks: project::TestPicks::default(),
+            };
+            // recent.json only ever holds user-picked paths, so authorising them at startup is safe.
+            for entry in project::load_recent(&ctx.user_data) {
+                ctx.auth.add(&entry.path);
             }
+            app.manage(ctx);
+            app.state::<Ctx>().mcp.restore();
+
+            menu::rebuild(app.handle());
+            app.on_menu_event(|h, e| menu::handle(h, e.id().as_ref()));
+            create_window(app, &d.user_data)?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            clip_bytes, spike_file, decode_pcm, sink_start, sink_frame, sink_finish,
-            export_start, export_frame, export_finish, progress, report
-        ])
-        .run(tauri::generate_context!())
-        .expect("error while running Frontstage");
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Moved(_) | tauri::WindowEvent::Resized(_) | tauri::WindowEvent::CloseRequested { .. }) && !test_mode() {
+                let ctx = window.state::<Ctx>();
+                save_window_state(window, &ctx.user_data, matches!(event, tauri::WindowEvent::CloseRequested { .. }));
+            }
+        })
+        .invoke_handler(handlers())
+        .build(tauri::generate_context!())
+        .expect("error while running Frontstage")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                app.state::<Ctx>().mcp.shutdown();
+            }
+        });
+}
+
+/// Whether the old Electron app left encrypted keys behind. Existence only.
+#[tauri::command]
+fn secrets_legacy_notice(ctx: tauri::State<'_, Ctx>) -> bool {
+    secrets::legacy_secrets_present(&ctx.electron_user_data) && !ctx.user_data.join("legacy-secrets-notice-dismissed").exists()
+}
+
+#[tauri::command]
+fn secrets_dismiss_legacy_notice(ctx: tauri::State<'_, Ctx>) -> Result<(), String> {
+    std::fs::write(ctx.user_data.join("legacy-secrets-notice-dismissed"), "1").map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn app_tools_status(ctx: tauri::State<'_, Ctx>) -> serde_json::Value {
+    serde_json::json!({ "ffmpeg": ctx.tools.ffmpeg().is_some(), "ffprobe": ctx.tools.ffprobe().is_some() })
+}
+
+macro_rules! handlers_with {
+    ($($extra:tt)*) => {
+        tauri::generate_handler![
+            app_tools_status, secrets_legacy_notice, secrets_dismiss_legacy_notice,
+            project::project_read_text, project::project_write_text, project::project_write_media, project::project_read_media, project::project_has_media,
+            project::project_write_export_text, project::project_list_recent, project::project_add_recent, project::project_remove_recent,
+            project::project_pick_open, project::project_pick_save_as, project::project_pick_export_save, project::project_set_next_pick,
+            project::project_set_next_export_pick, project::project_authorize_path,
+            projects::projects_list, projects::projects_resolve, projects::projects_create, projects::projects_upsert, projects::projects_cleanup_failed_create,
+            export::export_session_start, export::export_video_frame, export::export_audio_data, export::export_session_finish,
+            ai::ai_set_key, ai::ai_has_key, ai::ai_clear_key, ai::ai_generate_image, ai::ai_stream_chat,
+            gen::gen_fal_submit, gen::gen_fal_status, gen::gen_fal_download, gen::gen_fal_upload,
+            media::media_extract_audio_path, media::media_extract_audio_bytes, media::media_read_timecode, media::media_import_scan,
+            media::media_import_copy, media::media_import_download, media::media_read_local_file,
+            proxy::media_proxy_ensure_path, proxy::media_proxy_ensure_bytes, proxy::media_proxy_read,
+            frames::media_sample_frames,
+            characters::characters_list_ids, characters::characters_read_file, characters::characters_write_file, characters::characters_remove,
+            skills::skills_list, skills::skills_read, skills::skills_write, skills::skills_remove, skills::skills_read_ledger, skills::skills_write_ledger,
+            skills::skills_reveal, skills::skills_open_root, skills::skills_export_to_agent, skills::skills_cache_read, skills::skills_cache_write,
+            morphic::morphic_status, morphic::morphic_sign_in, morphic::morphic_sign_out, morphic::morphic_call_tool, morphic::morphic_upload, morphic::morphic_download,
+            claude::claude_run,
+            studio::studio_write_flow_pack,
+            mcp::mcp_get_status, mcp::mcp_set_enabled, mcp::mcp_regenerate_token, mcp::mcp_response,
+            $($extra)*
+        ]
+    };
+}
+
+#[cfg(feature = "webkit-tests")]
+fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
+    handlers_with!(
+        spike::clip_bytes, spike::spike_file, spike::decode_pcm, spike::sink_start, spike::sink_frame, spike::sink_finish,
+        spike::export_start, spike::export_frame, spike::export_finish, spike::progress, spike::report, spike::smoke_js_dialog_log, spike::smoke_mcp_probe,
+    )
+}
+
+#[cfg(not(feature = "webkit-tests"))]
+fn handlers() -> impl Fn(tauri::ipc::Invoke) -> bool + Send + Sync + 'static {
+    handlers_with!()
 }

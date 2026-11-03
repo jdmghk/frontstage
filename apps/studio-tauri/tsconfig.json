@@ -1,5 +1,27 @@
 {
   "extends": "../../tsconfig.base.json",
-  "compilerOptions": { "noEmit": true, "types": ["vite/client", "@webgpu/types"], "lib": ["ES2022", "DOM", "DOM.Iterable"], "paths": { "mp4box": ["../../packages/engine/src/demux/mp4box.d.ts"] } },
-  "include": ["src"]
+  "compilerOptions": {
+    "noEmit": true,
+    "types": [
+      "vite/client",
+      "@webgpu/types",
+      "@types/node"
+    ],
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "paths": {
+      "mp4box": [
+        "../../packages/engine/src/demux/mp4box.d.ts"
+      ]
+    },
+    "jsx": "react-jsx",
+    "moduleResolution": "Bundler"
+  },
+  "include": [
+    "src",
+    "test"
+  ]
 }

@@ -6,17 +6,27 @@
   "type": "module",
   "scripts": {
     "build:web": "vite build",
+    "build:web:test": "VITE_TEST_PAGES=1 vite build",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@frontstage/core": "workspace:*",
     "@frontstage/engine": "workspace:*",
-    "@tauri-apps/api": "2.12.4"
+    "@tauri-apps/api": "2.12.4",
+    "@frontstage/ai": "workspace:*",
+    "@frontstage/ui": "workspace:*",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.12.4",
     "@webgpu/types": "^0.1.40",
     "typescript": "^5.5.0",
-    "vite": "^5.4.0"
+    "vite": "^5.4.0",
+    "@types/node": "^22",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "vitest": "^2.0.0"
   }
 }

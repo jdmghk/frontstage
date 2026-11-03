@@ -5,11 +5,23 @@
   "identifier": "studio.frontstage.tauri",
   "build": { "frontendDist": "../dist" },
   "app": {
-    "windows": [
-      { "title": "Frontstage spike", "width": 340, "height": 260, "focus": false, "resizable": true }
-    ],
+    "windows": [],
     "security": {
-      "csp": null,
+      "csp": {
+        "default-src": "'self'",
+        "script-src": "'self' blob: 'wasm-unsafe-eval' https://cdn.jsdelivr.net",
+        "worker-src": "'self' blob:",
+        "style-src": "'self' 'unsafe-inline'",
+        "img-src": "'self' data: blob:",
+        "media-src": "'self' data: blob:",
+        "font-src": "'self' data:",
+        "connect-src": "'self' blob: data: ipc: http://ipc.localhost https://raw.githubusercontent.com https://huggingface.co https://*.huggingface.co https://*.hf.co https://cdn.jsdelivr.net",
+        "object-src": "'none'",
+        "base-uri": "'self'",
+        "frame-src": "'none'",
+        "form-action": "'none'"
+      },
+      "dangerousDisableAssetCspModification": ["style-src"],
       "headers": {
         "Cross-Origin-Opener-Policy": "same-origin",
         "Cross-Origin-Embedder-Policy": "require-corp"
