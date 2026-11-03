@@ -1,0 +1,10 @@
+{
+  "bundle": {
+    "externalBin": ["binaries/ffmpeg"],
+    "resources": {
+      "licenses/THIRD-PARTY-NOTICES.txt": "licenses/THIRD-PARTY-NOTICES.txt",
+      "../../../LICENSE": "licenses/GPL-3.0.txt",
+      "../../../NOTICE": "licenses/NOTICE.txt"
+    }
+  }
+}

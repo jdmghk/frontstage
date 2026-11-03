@@ -39,12 +39,14 @@
       "app",
       "dmg"
     ],
+    "copyright": "Copyright (C) 2026 x777. Free software under the GNU GPL v3. Includes FFmpeg and x264 (GPL). Licences and source: Contents/Resources/licenses.",
     "icon": [
       "icons/icon.icns",
+      "icons/icon.ico",
       "icons/icon.png"
     ],
     "macOS": {
-      "minimumSystemVersion": "13.0"
+      "minimumSystemVersion": "13.7"
     }
   }
 }

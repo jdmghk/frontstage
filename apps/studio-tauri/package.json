@@ -7,6 +7,9 @@
   "scripts": {
     "build:web": "vite build",
     "build:web:test": "VITE_TEST_PAGES=1 vite build",
+    "ffmpeg:build": "scripts/build-ffmpeg.sh",
+    "ffmpeg:fetch-stock": "node scripts/fetch-ffmpeg.mjs",
+    "bundle": "tauri build --config src-tauri/tauri.bundle.conf.json",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

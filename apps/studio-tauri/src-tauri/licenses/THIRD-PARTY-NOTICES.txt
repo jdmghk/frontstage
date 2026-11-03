@@ -1,0 +1,68 @@
+Third-party software in Frontstage's macOS app
+
+Frontstage is licensed under the GNU General Public License version 3: see GPL-3.0.txt and NOTICE.txt
+beside this file. Frontstage runs a bundled program, ffmpeg (Contents/MacOS/ffmpeg), as a separate process.
+
+That ffmpeg is built by apps/studio-tauri/scripts/build-ffmpeg.sh in Frontstage's source repository,
+with --enable-gpl, from the sources below. Because it includes x264, the binary as a whole is under the
+GNU GPL, version 2 or later. You may use, change and redistribute it under the terms of that licence, and
+GPL-3.0.txt applies to it under the "or later" option. It comes with NO WARRANTY.
+
+You are entitled to the complete corresponding source code of ffmpeg, x264, dav1d and zimg, and to
+the script that builds them. Each release of Frontstage publishes them next to its download.
+
+  FFmpeg 7.1.5    GPL-2.0-or-later as configured   https://github.com/FFmpeg/FFmpeg
+                  commit 3a0867c2bfda4a4d4309ca1a8cbdc6175e67f587 (tag n7.1.5)
+  x264            GPL-2.0-or-later                 https://code.videolan.org/videolan/x264
+                  commit b35605ace3ddf7c1a5d67a2eb553f034aef41d55
+  dav1d 1.5.4     BSD-2-Clause                     https://downloads.videolan.org/pub/videolan/dav1d/1.5.4/
+  zimg 3.0.6      WTFPL-2.0                        https://github.com/sekrit-twc/zimg (tag release-3.0.6)
+
+No component was modified. ffmpeg's configure options are printed by `ffmpeg -version`.
+
+This notice covers copyright only. H.264, HEVC and AAC may be subject to patents in some countries.
+
+--------------------------------------------------------------------------------
+dav1d
+--------------------------------------------------------------------------------
+Copyright © 2018-2025, VideoLAN and dav1d authors
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+--------------------------------------------------------------------------------
+zimg
+--------------------------------------------------------------------------------
+            DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE
+                    Version 2, December 2004
+
+ Copyright (C) 2004 Sam Hocevar <sam@hocevar.net>
+
+ Everyone is permitted to copy and distribute verbatim or modified
+ copies of this license document, and changing it is allowed as long
+ as the name is changed.
+
+            DO WHAT THE FUCK YOU WANT TO PUBLIC LICENSE
+   TERMS AND CONDITIONS FOR COPYING, DISTRIBUTION AND MODIFICATION
+
+  0. You just DO WHAT THE FUCK YOU WANT TO.
+
