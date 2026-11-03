@@ -66,8 +66,10 @@ pub struct AudioFormat {
     pub channels: u32,
 }
 
-/// Encoded video + raw audio (optional) + SRT (optional, as a mov_text track).
-pub fn mux_args(spec: &CodecSpec, audio: Option<AudioFormat>, video: &str, audio_path: Option<&str>, out: &str, srt: Option<&str>) -> Vec<String> {
+/// Encoded video + raw audio (optional) + SRT (optional, as a mov_text track). `video_secs` is the
+/// video's length, which ends the file when there are captions: -shortest counts the subtitle track, so
+/// it would cut the export at the last caption.
+pub fn mux_args(spec: &CodecSpec, audio: Option<AudioFormat>, video: &str, audio_path: Option<&str>, out: &str, srt: Option<&str>, video_secs: f64) -> Vec<String> {
     let mut a: Vec<String> = vec!["-y".into(), "-i".into(), video.into()];
     let has_audio = audio_path.is_some();
     if let (Some(p), Some(f)) = (audio_path, audio) {
@@ -91,7 +93,9 @@ pub fn mux_args(spec: &CodecSpec, audio: Option<AudioFormat>, video: &str, audio
         a.extend(["-c:s".into(), "mov_text".into(), "-metadata:s:s:0".into(), "language=eng".into()]);
     }
     a.extend(spec.mux_flags.iter().map(|s| s.to_string()));
-    if has_audio {
+    if srt.is_some() {
+        a.extend(["-t".into(), video_secs.to_string()]);
+    } else if has_audio {
         a.push("-shortest".into());
     }
     a.push(out.into());
@@ -117,6 +121,8 @@ struct Session {
     audio: Option<AudioFormat>,
     out: PathBuf,
     frame_bytes: usize,
+    fps: f64,
+    frames_sent: u64,
     child: Child,
     stdin: Option<ChildStdin>,
     stderr: Arc<Mutex<String>>,
@@ -224,6 +230,8 @@ impl Exports {
             audio: o.audio,
             out: resolved,
             frame_bytes: o.width as usize * o.height as usize * 4,
+            fps: o.fps,
+            frames_sent: 0,
             child,
             stdin,
             stderr,
@@ -244,7 +252,9 @@ impl Exports {
             return Err(format!("frame is {} bytes, expected {}", frame.len(), s.frame_bytes));
         }
         let stdin = s.stdin.as_mut().ok_or("ffmpeg stdin closed")?;
-        stdin.write_all(frame).map_err(|e| format!("ffmpeg stopped accepting frames: {e}. {}", tail_chars(&s.stderr.lock().unwrap(), 500)))
+        stdin.write_all(frame).map_err(|e| format!("ffmpeg stopped accepting frames: {e}. {}", tail_chars(&s.stderr.lock().unwrap(), 500)))?;
+        s.frames_sent += 1;
+        Ok(())
     }
 
     pub fn audio_data(&self, data: &[u8]) -> Result<(), String> {
@@ -311,7 +321,7 @@ impl Exports {
         let spec = codec(&s.codec).ok_or("unsupported codec")?;
         let audio_str = s.audio_path.as_ref().map(|p| p.to_string_lossy().into_owned());
         let srt_str = s.srt_path.as_ref().map(|p| p.to_string_lossy().into_owned());
-        let args = mux_args(&spec, s.audio, &s.video_only.to_string_lossy(), audio_str.as_deref(), &out, srt_str.as_deref());
+        let args = mux_args(&spec, s.audio, &s.video_only.to_string_lossy(), audio_str.as_deref(), &out, srt_str.as_deref(), s.frames_sent as f64 / s.fps);
         let muxed = tools::command(&s.bin).args(&args).stdin(Stdio::null()).output().map_err(|e| format!("ffmpeg mux spawn error: {e}"));
         cleanup(&s);
         let o = muxed?;
@@ -369,7 +379,7 @@ mod tests {
             assert!(v.iter().any(|a| a == want), "{want}");
         }
         assert_eq!(v.last().unwrap(), "/o.mp4");
-        let m = mux_args(&spec, Some(AudioFormat { sample_rate: 44100, channels: 2 }), "/v.mp4", Some("/a.f32le"), "/o.mp4", None);
+        let m = mux_args(&spec, Some(AudioFormat { sample_rate: 44100, channels: 2 }), "/v.mp4", Some("/a.f32le"), "/o.mp4", None, 1.0);
         assert!(joined(&m).contains("-c:v copy -c:a aac -b:a 320k -ar 48000 -movflags +faststart -shortest /o.mp4"));
     }
 
@@ -377,17 +387,18 @@ mod tests {
     fn default_codecs_keep_their_previous_arguments() {
         let spec = codec("libx264").unwrap();
         assert_eq!(video_args(&spec, 1280, 720, 24.0, "/o.mp4"), ["-y", "-f", "rawvideo", "-pix_fmt", "rgba", "-s", "1280x720", "-r", "24", "-i", "pipe:0", "-vf", "scale=out_color_matrix=bt709,setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709", "-c:v", "libx264", "-pix_fmt", "yuv420p", "/o.mp4"]);
-        assert_eq!(joined(&mux_args(&spec, Some(AudioFormat { sample_rate: 48000, channels: 2 }), "/v", Some("/a"), "/o", None)), "-y -i /v -f f32le -ar 48000 -ac 2 -i /a -map 0:v -map 1:a -c:v copy -c:a aac -shortest /o");
+        assert_eq!(joined(&mux_args(&spec, Some(AudioFormat { sample_rate: 48000, channels: 2 }), "/v", Some("/a"), "/o", None, 1.0)), "-y -i /v -f f32le -ar 48000 -ac 2 -i /a -map 0:v -map 1:a -c:v copy -c:a aac -shortest /o");
     }
 
     #[test]
     fn captions_are_a_mov_text_track_mapped_after_audio_or_alone_with_video() {
         let yt = codec("libx264_youtube").unwrap();
-        let with_audio = joined(&mux_args(&yt, Some(AudioFormat { sample_rate: 48000, channels: 2 }), "/v.mp4", Some("/a.f32le"), "/o.mp4", Some("/s.srt")));
+        let with_audio = joined(&mux_args(&yt, Some(AudioFormat { sample_rate: 48000, channels: 2 }), "/v.mp4", Some("/a.f32le"), "/o.mp4", Some("/s.srt"), 12.5));
         assert!(with_audio.contains("-f srt -i /s.srt -map 0:v -map 1:a -map 2:s"));
         assert!(with_audio.contains("-c:s mov_text"));
+        assert!(with_audio.ends_with("-t 12.5 /o.mp4") && !with_audio.contains("-shortest"), "{with_audio}");
         let plain = codec("libx264").unwrap();
-        assert_eq!(joined(&mux_args(&plain, None, "/v.mp4", None, "/o.mp4", Some("/s.srt"))), "-y -i /v.mp4 -f srt -i /s.srt -map 0:v -map 1:s -c:v copy -c:s mov_text -metadata:s:s:0 language=eng /o.mp4");
+        assert_eq!(joined(&mux_args(&plain, None, "/v.mp4", None, "/o.mp4", Some("/s.srt"), 2.0)), "-y -i /v.mp4 -f srt -i /s.srt -map 0:v -map 1:s -c:v copy -c:s mov_text -metadata:s:s:0 language=eng -t 2 /o.mp4");
     }
 
     #[test]
@@ -533,6 +544,34 @@ mod tests {
         let text = String::from_utf8_lossy(&info.stderr);
         // All three tags: "bt709/unknown/unknown" is what ffmpeg 7 wrote with encoder options alone.
         assert!(text.contains("yuv420p(tv, bt709, progressive)"), "{text}");
+    }
+
+    #[test]
+    fn captions_that_end_early_dont_cut_the_video_or_audio() {
+        let (Some(bin), Some(check)) = (crate::tools::Tools::locate().ffmpeg(), crate::tools::test_generator()) else {
+            eprintln!("SKIPPED: no ffmpeg");
+            return;
+        };
+        let d = TempDir::new("export-captions");
+        let a = Authorized::default();
+        a.add(d.path());
+        let x = Exports::default();
+        let out = d.path().join("o.mp4");
+        x.start(&a, Some(bin), StartOpts {
+            width: 64, height: 64, fps: 10.0, codec: "libx264_youtube".into(),
+            audio: Some(AudioFormat { sample_rate: 48000, channels: 2 }),
+            subtitles_srt: Some("1\n00:00:00,000 --> 00:00:00,500\nHello\n".into()),
+            ..opts(out.to_str().unwrap())
+        }).unwrap();
+        for _ in 0..30 {
+            x.video_frame(&[9u8; 64 * 64 * 4]).unwrap();
+        }
+        x.audio_data(&vec![0u8; 48000 * 8 * 4]).unwrap(); // 4 s of audio, longer than the video
+        x.finish().unwrap();
+        let count = |kind: &str, fmt: &str| Command::new(&check).args(["-v", "error", "-i", out.to_str().unwrap(), "-map", kind, "-f", fmt, "pipe:1"]).output().unwrap().stdout.len();
+        assert_eq!(count("0:v", "rawvideo"), 64 * 64 * 3 / 2 * 30);
+        let samples = count("0:a", "f32le") as f64 / 4.0 / 2.0 / 48000.0;
+        assert!((samples - 3.0).abs() < 0.1, "{samples} s of audio");
     }
 
     #[test]
