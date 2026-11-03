@@ -1,0 +1,13 @@
+Third-party software in Frontstage's Windows app
+
+Frontstage is licensed under the GNU General Public License version 3: see GPL-3.0.txt and NOTICE.txt
+beside this file. Frontstage runs a bundled program, ffmpeg.exe, as a separate process.
+
+That ffmpeg.exe is an unmodified stock build: FFmpeg 6.1.1 "essentials" from https://www.gyan.dev/ffmpeg/builds/,
+as republished by https://github.com/eugeneware/ffmpeg-static (release b6.1.1). It is licensed under the GNU GPL
+version 3 and comes with NO WARRANTY. FFmpeg source: https://github.com/FFmpeg/FFmpeg/commit/e38092ef93
+
+It statically includes libx264, libx265 and other libraries, each under its own licence. You are entitled to
+their complete corresponding source code. Each release of Frontstage publishes it next to its download.
+
+This notice covers copyright only. H.264, HEVC and AAC may be subject to patents in some countries.
