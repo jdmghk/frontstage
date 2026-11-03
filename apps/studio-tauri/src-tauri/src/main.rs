@@ -276,7 +276,10 @@ fn secrets_dismiss_legacy_notice(ctx: tauri::State<'_, Ctx>) -> Result<(), Strin
 
 #[tauri::command]
 fn app_tools_status(ctx: tauri::State<'_, Ctx>) -> serde_json::Value {
-    serde_json::json!({ "ffmpeg": ctx.tools.ffmpeg().is_some(), "ffprobe": ctx.tools.ffprobe().is_some() })
+    #[cfg(feature = "webkit-tests")]
+    return serde_json::json!({ "ffmpeg": ctx.tools.ffmpeg().is_some(), "ffmpegPath": ctx.tools.ffmpeg() });
+    #[cfg(not(feature = "webkit-tests"))]
+    serde_json::json!({ "ffmpeg": ctx.tools.ffmpeg().is_some() })
 }
 
 macro_rules! handlers_with {

@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::{Arc, Condvar, Mutex};
 
 use serde_json::json;
@@ -15,6 +15,7 @@ use tauri::ipc::{Request, Response};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::project::{assert_inside, Authorized};
+use crate::tools;
 use crate::util::{blocking, header, hex, raw_body, tail_chars};
 use crate::Ctx;
 
@@ -63,7 +64,8 @@ pub struct SourceInfo {
 }
 
 pub fn parse_banner(stderr: &str) -> SourceInfo {
-    let video = stderr.lines().find(|l| l.contains("Stream #") && l.contains("Video:")).unwrap_or("");
+    // By indentation: a file's own title or comment can contain this text too.
+    let video = stderr.lines().find(|l| l.starts_with("  Stream #") && l.contains("Video:")).unwrap_or("");
     let hdr = video.contains("smpte2084") || video.contains("arib-std-b67");
     let duration_sec = stderr.lines().find_map(|l| l.trim().strip_prefix("Duration: ")).and_then(|r| r.split(',').next()).and_then(parse_clock);
     SourceInfo { hdr, duration_sec }
@@ -157,12 +159,12 @@ fn convert(bin: &Path, input: &Path, out: &Path, progress: &(dyn Fn(f64) + Send 
     let dir = out.parent().expect("has a parent");
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let input_str = input.to_string_lossy();
-    let banner = Command::new(bin).args(["-hide_banner", "-i", input_str.as_ref()]).stdin(Stdio::null()).output().map_err(|e| format!("ffmpeg spawn error: {e}"))?;
+    let banner = tools::command(bin).args(["-hide_banner", "-i", input_str.as_ref()]).stdin(Stdio::null()).output().map_err(|e| format!("ffmpeg spawn error: {e}"))?;
     let info = parse_banner(&String::from_utf8_lossy(&banner.stderr));
 
     let part = dir.join(format!("{}.part.mp4", out.file_stem().and_then(|s| s.to_str()).unwrap_or("proxy")));
     let args = proxy_args(&input_str, &part.to_string_lossy(), info.hdr);
-    let mut child = Command::new(bin).args(&args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| format!("ffmpeg spawn error: {e}"))?;
+    let mut child = tools::command(bin).args(&args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| format!("ffmpeg spawn error: {e}"))?;
     let mut stderr_pipe = child.stderr.take();
     let stderr_thread = std::thread::spawn(move || {
         let mut s = Vec::new();
@@ -259,6 +261,7 @@ pub async fn media_proxy_read(key: String, ctx: State<'_, Ctx>) -> Result<Respon
 mod tests {
     use super::*;
     use crate::util::testutil::TempDir;
+    use std::process::Command;
 
     #[test]
     fn key_is_the_same_from_bytes_and_from_a_file_at_every_size_class() {
@@ -309,6 +312,8 @@ mod tests {
         assert_eq!(parse_banner(hdr), SourceInfo { hdr: true, duration_sec: Some(62.5) });
         let hlg = "  Stream #0:0: Video: h264 (High 10), yuv420p10le(tv, bt2020nc/bt2020/arib-std-b67), 640x360\n";
         assert!(parse_banner(hlg).hdr);
+        let spoofed = "  Metadata:\n    comment         : Stream #0:0: Video: smpte2084\n  Stream #0:0: Video: h264, yuv420p(tv, bt709), 640x360\n";
+        assert!(!parse_banner(spoofed).hdr);
         let sdr = "  Duration: N/A, bitrate: N/A\n  Stream #0:0: Video: h264, yuv420p(tv, bt709), 640x360\n";
         assert_eq!(parse_banner(sdr), SourceInfo { hdr: false, duration_sec: None });
     }
@@ -328,8 +333,10 @@ mod tests {
         crate::tools::Tools::locate().ffmpeg()
     }
 
-    fn make_clip(bin: &Path, out: &Path, extra: &[&str]) {
-        let st = Command::new(bin)
+    // Clips come from the stock ffmpeg (lavfi, 10-bit x264); the trimmed one only has to convert them.
+    fn make_clip(out: &Path, extra: &[&str]) {
+        let gen = crate::tools::test_generator().expect("stock ffmpeg");
+        let st = Command::new(gen)
             .args(["-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=64x48:rate=10:duration=1", "-f", "lavfi", "-i", "sine=frequency=440:duration=1"])
             .args(extra)
             .arg(out)
@@ -341,13 +348,13 @@ mod tests {
 
     #[test]
     fn a_10_bit_clip_becomes_8_bit_h264_with_audio_and_the_source_is_untouched() {
-        let Some(bin) = ffmpeg() else {
+        let (Some(bin), Some(gen)) = (ffmpeg(), crate::tools::test_generator()) else {
             eprintln!("SKIPPED: no ffmpeg");
             return;
         };
         let d = TempDir::new("proxy-real");
         let src = d.path().join("in.mp4");
-        make_clip(&bin, &src, &["-c:v", "libx264", "-profile:v", "high10", "-pix_fmt", "yuv420p10le", "-c:a", "aac"]);
+        make_clip(&src, &["-c:v", "libx264", "-profile:v", "high10", "-pix_fmt", "yuv420p10le", "-c:a", "aac"]);
         let before = fs::read(&src).unwrap();
         let cache = d.path().join("cache");
         let key = key_of_file(&src).unwrap();
@@ -356,7 +363,7 @@ mod tests {
         Proxies::default().ensure(&bin, &cache, &src, &key, &move |f| s2.lock().unwrap().push(f)).unwrap();
         assert_eq!(fs::read(&src).unwrap(), before);
         let out = proxy_path(&cache, &key);
-        let info = Command::new(&bin).args(["-hide_banner", "-i", out.to_str().unwrap()]).output().unwrap();
+        let info = Command::new(&gen).args(["-hide_banner", "-i", out.to_str().unwrap()]).output().unwrap();
         let text = String::from_utf8_lossy(&info.stderr);
         assert!(text.contains("Video: h264") && text.contains("yuv420p(") && text.contains("Audio: aac"), "{text}");
         assert!(!text.contains("yuv420p10le"), "{text}");
@@ -366,13 +373,13 @@ mod tests {
 
     #[test]
     fn a_second_call_reuses_the_proxy_and_concurrent_calls_convert_once() {
-        let Some(bin) = ffmpeg() else {
+        let (Some(bin), Some(_)) = (ffmpeg(), crate::tools::test_generator()) else {
             eprintln!("SKIPPED: no ffmpeg");
             return;
         };
         let d = TempDir::new("proxy-once");
         let src = d.path().join("in.mp4");
-        make_clip(&bin, &src, &["-c:v", "libx264", "-pix_fmt", "yuv444p", "-c:a", "aac"]);
+        make_clip(&src, &["-c:v", "libx264", "-pix_fmt", "yuv444p", "-c:a", "aac"]);
         let cache = d.path().join("cache");
         let key = key_of_file(&src).unwrap();
         let p = Proxies::default();

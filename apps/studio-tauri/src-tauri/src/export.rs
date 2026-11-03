@@ -4,7 +4,7 @@
 use std::fs::File;
 use std::io::{BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -14,6 +14,7 @@ use tauri::ipc::Request;
 use tauri::State;
 
 use crate::project::{check_output_path, Authorized};
+use crate::tools;
 use crate::util::{blocking, raw_body, tail_chars};
 use crate::Ctx;
 
@@ -203,7 +204,7 @@ impl Exports {
                 None => None,
             };
             let args = video_args(&spec, o.width as u32, o.height as u32, o.fps, &video_only.to_string_lossy());
-            let mut child = Command::new(&bin).args(&args).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped()).spawn().map_err(|e| format!("ffmpeg spawn error: {e}"))?;
+            let mut child = tools::command(&bin).args(&args).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::piped()).spawn().map_err(|e| format!("ffmpeg spawn error: {e}"))?;
             let stdin = child.stdin.take();
             let (stderr, stderr_thread) = collect_stderr(&mut child);
             Ok::<_, String>((audio_file, child, stdin, stderr, stderr_thread))
@@ -310,7 +311,7 @@ impl Exports {
         let audio_str = s.audio_path.as_ref().map(|p| p.to_string_lossy().into_owned());
         let srt_str = s.srt_path.as_ref().map(|p| p.to_string_lossy().into_owned());
         let args = mux_args(&spec, s.audio, &s.video_only.to_string_lossy(), audio_str.as_deref(), &out, srt_str.as_deref());
-        let muxed = Command::new(&s.bin).args(&args).stdin(Stdio::null()).output().map_err(|e| format!("ffmpeg mux spawn error: {e}"));
+        let muxed = tools::command(&s.bin).args(&args).stdin(Stdio::null()).output().map_err(|e| format!("ffmpeg mux spawn error: {e}"));
         cleanup(&s);
         let o = muxed?;
         if !o.status.success() {
@@ -353,6 +354,7 @@ mod tests {
     //! Port of apps/desktop/test/export-codecs.test.ts, plus session checks.
     use super::*;
     use crate::util::testutil::TempDir;
+    use std::process::Command;
 
     fn joined(v: &[String]) -> String {
         v.join(" ")
@@ -462,12 +464,14 @@ mod tests {
         assert_eq!(x.finish().unwrap(), out.to_str().unwrap());
 
         // Decode the first frame back as grey: top row bright, bottom row dark.
-        let o = Command::new(&bin).args(["-v", "error", "-i", out.to_str().unwrap(), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"]).output().unwrap();
+        // The stock ffmpeg checks the output: the trimmed build has no rawvideo encoder.
+        let check = crate::tools::test_generator().expect("stock ffmpeg");
+        let o = Command::new(&check).args(["-v", "error", "-i", out.to_str().unwrap(), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "gray", "pipe:1"]).output().unwrap();
         assert_eq!(o.stdout.len(), w * h);
         assert!(o.stdout[w * 2] > 200, "top {}", o.stdout[w * 2]);
         assert!(o.stdout[w * (h - 3)] < 50, "bottom {}", o.stdout[w * (h - 3)]);
         // Three streams made it into the file.
-        let info = Command::new(&bin).args(["-hide_banner", "-i", out.to_str().unwrap()]).output().unwrap();
+        let info = Command::new(&check).args(["-hide_banner", "-i", out.to_str().unwrap()]).output().unwrap();
         let text = String::from_utf8_lossy(&info.stderr);
         assert!(text.contains("Video: h264") && text.contains("Audio: aac") && text.contains("Subtitle: mov_text"), "{text}");
     }
@@ -520,10 +524,11 @@ mod tests {
         }
         x.audio_data(&[0u8; 48000]).unwrap();
         x.finish().unwrap();
-        let o = Command::new(&bin).args(["-v", "error", "-i", out.to_str().unwrap(), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "yuv420p", "pipe:1"]).output().unwrap();
+        let check = crate::tools::test_generator().expect("stock ffmpeg");
+        let o = Command::new(&check).args(["-v", "error", "-i", out.to_str().unwrap(), "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "yuv420p", "pipe:1"]).output().unwrap();
         let y = o.stdout[64 * 32 + 32] as i32;
         assert!((y - 73).abs() <= 2, "Y {y}");
-        let info = Command::new(&bin).args(["-hide_banner", "-i", out.to_str().unwrap()]).output().unwrap();
+        let info = Command::new(&check).args(["-hide_banner", "-i", out.to_str().unwrap()]).output().unwrap();
         let text = String::from_utf8_lossy(&info.stderr);
         assert!(text.contains("bt709"), "{text}");
     }

@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -14,6 +14,7 @@ use tauri::State;
 
 use crate::net::{self, Net};
 use crate::project::{assert_inside, Authorized};
+use crate::tools;
 use crate::util::{blocking, raw_body, resolve, tail_chars};
 use crate::Ctx;
 
@@ -47,7 +48,7 @@ pub fn extract_audio(bin: &Path, input: Option<&str>, bytes: Option<&[u8]>) -> R
         return Err("media:extractAudio requires exactly one of path or bytes".into());
     }
     let args = audio_args(input.unwrap_or("pipe:0"));
-    let mut child = Command::new(bin).args(&args).stdin(if bytes.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| format!("ffmpeg spawn error: {e}"))?;
+    let mut child = tools::command(bin).args(&args).stdin(if bytes.is_some() { Stdio::piped() } else { Stdio::null() }).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().map_err(|e| format!("ffmpeg spawn error: {e}"))?;
     let mut stdin = child.stdin.take();
     let mut stderr_pipe = child.stderr.take();
     let stderr_thread = std::thread::spawn(move || {
@@ -90,7 +91,7 @@ pub async fn media_extract_audio_bytes(request: Request<'_>, ctx: State<'_, Ctx>
     blocking(|| extract_audio(&bin, None, Some(body))).map(Response::new)
 }
 
-// ── Timecode (the only ffprobe caller; Phase 3 replaces it) ─────────────────
+// ── Timecode ────────────────────────────────────────────────────────────────
 
 #[derive(Serialize, Debug, PartialEq, Clone)]
 pub struct TimecodeProbe {
@@ -98,29 +99,62 @@ pub struct TimecodeProbe {
     pub fps: f64,
 }
 
-/// "30000/1001", sometimes "0/0" for still or data streams.
-pub fn parse_avg_frame_rate(rate: &str) -> Option<f64> {
-    let (num, den) = rate.split_once('/').unwrap_or((rate, "1"));
-    let (num, den) = (num.trim().parse::<f64>().ok()?, den.trim().parse::<f64>().ok()?);
-    (num.is_finite() && den.is_finite() && den != 0.0).then_some(num / den)
+/// A stream line's "29.97 fps" field. ffmpeg prints two decimals, and "1k" for 1000. The renderer's
+/// parseTimecodeTag only uses this rounded to a whole number.
+fn banner_fps(stream_line: &str) -> Option<f64> {
+    let value = stream_line.split(", ").find_map(|field| field.trim().strip_suffix(" fps"))?;
+    let fps = match value.strip_suffix('k') {
+        Some(thousands) => thousands.parse::<f64>().ok()? * 1000.0,
+        None => value.parse::<f64>().ok()?,
+    };
+    (fps.is_finite() && fps > 0.0).then_some(fps)
 }
 
-pub fn parse_probe_output(stdout: &str) -> Option<TimecodeProbe> {
-    let v: Value = serde_json::from_str(stdout).ok()?;
-    let with_tag = v.get("streams")?.as_array()?.iter().find(|s| s.pointer("/tags/timecode").is_some_and(Value::is_string))?;
-    let fps = parse_avg_frame_rate(with_tag.get("avg_frame_rate")?.as_str()?).filter(|f| *f > 0.0)?;
-    Some(TimecodeProbe { tag: with_tag.pointer("/tags/timecode")?.as_str()?.to_string(), fps })
+/// From the stderr of `ffmpeg -i`. The first stream with a timecode tag gives the tag and, if it's a
+/// video stream, the rate. A tmcd track no video track links to prints no rate, so the first video
+/// stream gives it.
+///
+/// Indentation is what separates a stream's metadata from the file's (4 spaces). It's 6 in ffmpeg 6 and
+/// 8 in ffmpeg 7. ffmpeg starts a line inside a multi-line value with ": ", so a value can't pose as a key.
+pub fn parse_timecode_banner(stderr: &str) -> Option<TimecodeProbe> {
+    let mut tagged: Option<(String, Option<f64>)> = None;
+    let mut first_video_fps = None;
+    let mut seen_video = false;
+    let mut current_fps = None;
+    let mut in_stream = false;
+    for line in stderr.lines() {
+        if line.starts_with("Output #") {
+            break;
+        }
+        if line.starts_with("  Stream #") {
+            in_stream = true;
+            current_fps = banner_fps(line);
+            if line.contains(": Video: ") && !seen_video {
+                seen_video = true;
+                first_video_fps = current_fps;
+            }
+        } else if in_stream && tagged.is_none() {
+            if !line.starts_with("      ") {
+                continue;
+            }
+            if let Some((key, value)) = line.split_once(':') {
+                if key.trim() == "timecode" {
+                    tagged = Some((value.trim().to_string(), current_fps));
+                }
+            }
+        }
+    }
+    let (tag, fps) = tagged?;
+    Some(TimecodeProbe { tag, fps: fps.or(first_video_fps)? })
 }
 
 fn probe_one(bin: &Path, file: &str) -> Option<TimecodeProbe> {
-    let o = Command::new(bin).args(["-v", "quiet", "-show_entries", "stream_tags=timecode", "-show_entries", "stream=avg_frame_rate", "-of", "json", file]).stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?;
-    if !o.status.success() {
-        return None;
-    }
-    parse_probe_output(&String::from_utf8_lossy(&o.stdout))
+    // With no output file ffmpeg prints the banner and exits 1, so the exit code says nothing here.
+    let o = tools::command(bin).args(["-hide_banner", "-i", file]).stdin(Stdio::null()).stdout(Stdio::null()).output().ok()?;
+    parse_timecode_banner(&String::from_utf8_lossy(&o.stderr))
 }
 
-/// Never fails: a missing ffprobe or a file with no timecode is simply absent from the result.
+/// Never fails: a missing ffmpeg or a file with no timecode is simply absent from the result.
 pub fn read_timecode(bin: Option<&Path>, paths: &[Value]) -> HashMap<String, TimecodeProbe> {
     let Some(bin) = bin else { return HashMap::new() };
     let files: Vec<&str> = paths.iter().filter_map(Value::as_str).collect();
@@ -141,7 +175,7 @@ pub fn read_timecode(bin: Option<&Path>, paths: &[Value]) -> HashMap<String, Tim
 #[tauri::command]
 pub async fn media_read_timecode(paths: Value, ctx: State<'_, Ctx>) -> Result<HashMap<String, TimecodeProbe>, String> {
     let list = paths.as_array().cloned().unwrap_or_default();
-    let bin = ctx.tools.ffprobe();
+    let bin = ctx.tools.ffmpeg();
     Ok(blocking(|| read_timecode(bin.as_deref(), &list)))
 }
 
@@ -284,6 +318,7 @@ mod tests {
     use super::*;
     use crate::net::tests::FakeNet;
     use crate::util::testutil::{mock, Reply, TempDir};
+    use std::process::Command;
 
     fn authed() -> (Authorized, TempDir) {
         let d = TempDir::new("media");
@@ -311,12 +346,12 @@ mod tests {
 
     #[test]
     fn extract_audio_works_through_a_pipe_with_a_large_input() {
-        let Some(bin) = crate::tools::Tools::locate().ffmpeg() else {
+        let (Some(gen), Some(bin)) = (crate::tools::test_generator(), crate::tools::Tools::locate().ffmpeg()) else {
             eprintln!("SKIPPED: no ffmpeg");
             return;
         };
         // 30 s of silence as WAV: bigger than a pipe buffer in both directions.
-        let wav = Command::new(&bin).args(["-v", "error", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "30", "-f", "wav", "pipe:1"]).output().unwrap().stdout;
+        let wav = Command::new(&gen).args(["-v", "error", "-f", "lavfi", "-i", "anullsrc=r=48000:cl=stereo", "-t", "30", "-f", "wav", "pipe:1"]).output().unwrap().stdout;
         let out = extract_audio(&bin, None, Some(&wav)).unwrap();
         let secs = (out.len() - 44) as f64 / (16000.0 * 2.0);
         assert!((secs - 30.0).abs() < 0.1, "{secs}");
@@ -324,27 +359,125 @@ mod tests {
 
     #[test]
     fn frame_rate_parsing() {
-        assert!((parse_avg_frame_rate("30000/1001").unwrap() - 29.97).abs() < 0.01);
-        assert_eq!(parse_avg_frame_rate("25"), Some(25.0));
-        assert_eq!(parse_avg_frame_rate("0/0"), None);
-        assert_eq!(parse_avg_frame_rate("x/1"), None);
+        let line = |fps: &str| format!("  Stream #0:0[0x1]: Video: h264 (High) (avc1 / 0x31637661), yuv420p(progressive), 64x48 [SAR 1:1 DAR 4:3], 30 kb/s, {fps}, 29.97 tbr, 30k tbn (default)");
+        assert_eq!(banner_fps(&line("29.97 fps")), Some(29.97));
+        assert_eq!(banner_fps(&line("25 fps")), Some(25.0));
+        assert_eq!(banner_fps(&line("1k fps")), Some(1000.0));
+        assert_eq!(banner_fps(&line("0 fps")), None);
+        assert_eq!(banner_fps(&line("x fps")), None);
+        assert_eq!(banner_fps("  Stream #0:2[0x3](eng): Data: none (tmcd / 0x64636D74), 0 kb/s"), None);
     }
+
+    const TAGGED: &str = "Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'a.mov':
+  Metadata:
+    major_brand     : qt  
+  Duration: 00:00:00.50, start: 0.000000, bitrate: 148 kb/s
+  Stream #0:0[0x1]: Video: h264 (High) (avc1 / 0x31637661), yuv420p(progressive), 64x48, 30 kb/s, 23.98 fps, 23.98 tbr, 24k tbn (default)
+    Metadata:
+      handler_name    : Core Media Video
+      timecode        : 01:00:00;02
+  Stream #0:1[0x2](eng): Data: none (tmcd / 0x64636D74), 0 kb/s
+    Metadata:
+      timecode        : 01:00:00;02
+At least one output file must be specified
+";
 
     #[test]
     fn probe_output_takes_the_stream_with_a_timecode_tag() {
-        let j = r#"{"streams":[{"avg_frame_rate":"0/0"},{"avg_frame_rate":"24000/1001","tags":{"timecode":"01:00:00:00"}}]}"#;
-        let p = parse_probe_output(j).unwrap();
-        assert_eq!(p.tag, "01:00:00:00");
-        assert!((p.fps - 23.976).abs() < 0.01);
-        for bad in ["nope", "{}", r#"{"streams":[{"avg_frame_rate":"30/1"}]}"#, r#"{"streams":[{"avg_frame_rate":"0/0","tags":{"timecode":"x"}}]}"#] {
-            assert_eq!(parse_probe_output(bad), None, "{bad}");
+        let p = parse_timecode_banner(TAGGED).unwrap();
+        assert_eq!(p.tag, "01:00:00;02");
+        assert_eq!(p.fps.round(), 24.0);
+        let audio_first = "  Stream #0:0: Audio: aac, 48000 Hz, mono\n    Metadata:\n      handler_name    : x\n  Stream #0:1: Video: h264, yuv420p, 25 fps, 25 tbr\n    Metadata:\n      timecode        : 02:00:00:00\n";
+        assert_eq!(parse_timecode_banner(audio_first), Some(TimecodeProbe { tag: "02:00:00:00".into(), fps: 25.0 }));
+        // A tmcd track with no link from the video track: the video stream gives the rate.
+        let unlinked = "  Stream #0:0: Video: h264, yuv420p, 30 fps, 30 tbr\n  Stream #0:1: Data: none (tmcd / 0x64636D74)\n    Metadata:\n      timecode        : 03:00:00:00\n";
+        assert_eq!(parse_timecode_banner(unlinked), Some(TimecodeProbe { tag: "03:00:00:00".into(), fps: 30.0 }));
+        for bad in [
+            "nope",
+            "",
+            "  Stream #0:0: Video: h264, yuv420p, 30 fps, 30 tbr\n",
+            // No rate anywhere, like ffprobe's "0/0".
+            "  Stream #0:0: Video: h264, yuv420p, 30 tbr\n    Metadata:\n      timecode        : 01:00:00:00\n",
+            "  Stream #0:0: Data: none (tmcd / 0x64636D74)\n    Metadata:\n      timecode        : 01:00:00:00\n",
+        ] {
+            assert_eq!(parse_timecode_banner(bad), None, "{bad}");
         }
+    }
+
+    // The layout ffmpeg 7 prints: stream metadata two spaces deeper than ffmpeg 6's.
+    #[test]
+    fn both_banner_layouts_parse() {
+        let v7 = "  Stream #0:0[0x1](und): Video: h264 (High), yuv420p, 30 kb/s, 30 fps, 30 tbr\n      Metadata:\n        handler_name    : VideoHandler\n        timecode        : 01:00:00:00\n";
+        assert_eq!(parse_timecode_banner(v7), Some(TimecodeProbe { tag: "01:00:00:00".into(), fps: 30.0 }));
+    }
+
+    #[test]
+    fn metadata_text_cant_pose_as_a_stream_or_a_stream_tag() {
+        let spoof = "Input #0, mov, from 'a.mp4':
+  Metadata:
+    title           :   timecode        : 09:09:09:09
+    comment         : Stream #0:0: Video: h264, 12.00 fps
+    timecode        : 08:00:00:00
+  Duration: 00:00:00.50, start: 0.000000, bitrate: 58 kb/s
+  Stream #0:0: Video: h264, yuv420p, 30 fps, 30 tbr
+    Metadata:
+      title           : first line
+                      : timecode : 07:00:00:00
+";
+        assert_eq!(parse_timecode_banner(spoof), None);
     }
 
     #[test]
     fn read_timecode_never_fails() {
         assert!(read_timecode(None, &[json!("/x.mp4")]).is_empty());
-        assert!(read_timecode(Some(Path::new("/definitely/not/ffprobe")), &[json!("/x.mp4"), json!(3)]).is_empty());
+        assert!(read_timecode(Some(Path::new("/definitely/not/ffmpeg")), &[json!("/x.mp4"), json!(3)]).is_empty());
+    }
+
+    // Real tagged clips, written by the stock ffmpeg and read by the app's. `quanta` is what the
+    // renderer's parseTimecodeTag derives from fps.
+    #[test]
+    fn real_tagged_clips_read_the_same_as_ffprobe_did() {
+        let (Some(gen), Some(bin)) = (crate::tools::test_generator(), crate::tools::Tools::locate().ffmpeg()) else {
+            eprintln!("SKIPPED: no ffmpeg");
+            return;
+        };
+        let d = TempDir::new("timecode");
+        let cases = [
+            ("a.mp4", "30", Some("01:00:00:00"), 30.0),
+            ("b.mov", "30000/1001", Some("01:00:00;02"), 30.0),
+            ("c.mov", "24000/1001", Some("10:11:12:13"), 24.0),
+            ("d.mp4", "25", Some("00:59:59:24"), 25.0),
+            ("e.mov", "60000/1001", Some("00:10:00;04"), 60.0),
+            ("f.mp4", "30", None, 0.0),
+        ];
+        let mut paths = vec![];
+        for (name, rate, tc, _) in &cases {
+            let out = d.path().join(name);
+            let src = format!("testsrc2=s=64x48:r={rate}:d=0.2");
+            let mut c = Command::new(&gen);
+            c.args(["-y", "-v", "error", "-f", "lavfi", "-i", &src, "-c:v", "libx264"]);
+            if let Some(tc) = tc {
+                c.args(["-timecode", tc]);
+            }
+            assert!(c.arg(&out).stdin(Stdio::null()).status().unwrap().success());
+            paths.push(json!(out.to_str().unwrap()));
+        }
+        let not_media = d.path().join("g.mp4");
+        fs::write(&not_media, "not a video").unwrap();
+        paths.push(json!(not_media.to_str().unwrap()));
+        let got = read_timecode(Some(&bin), &paths);
+        for (name, _, tc, quanta) in &cases {
+            let p = got.get(d.path().join(name).to_str().unwrap());
+            match tc {
+                Some(tc) => {
+                    let p = p.unwrap_or_else(|| panic!("{name}: no timecode"));
+                    assert_eq!(p.tag, *tc, "{name}");
+                    assert_eq!(p.fps.round(), *quanta, "{name}");
+                }
+                None => assert!(p.is_none(), "{name}"),
+            }
+        }
+        assert_eq!(got.len(), 5);
     }
 
     #[test]

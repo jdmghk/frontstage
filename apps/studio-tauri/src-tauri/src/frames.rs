@@ -2,7 +2,7 @@
 //! over a pipe; nothing is written to disk.
 
 use std::path::Path;
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -89,8 +89,8 @@ pub struct Output {
     pub stderr: Vec<u8>,
 }
 
-fn spawn_ffmpeg(bin: &Path, args: &[String]) -> Result<Output, String> {
-    let o = Command::new(bin).args(args).stdin(Stdio::null()).output().map_err(|e| e.to_string())?;
+pub fn spawn_ffmpeg(bin: &Path, args: &[String]) -> Result<Output, String> {
+    let o = crate::tools::command(bin).args(args).stdin(Stdio::null()).output().map_err(|e| e.to_string())?;
     Ok(Output { ok: o.status.success(), code: o.status.code(), stdout: o.stdout, stderr: o.stderr })
 }
 
