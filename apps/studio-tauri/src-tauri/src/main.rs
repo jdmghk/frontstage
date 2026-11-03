@@ -7,6 +7,8 @@ mod characters;
 mod claude;
 mod dialogs;
 mod export;
+#[cfg(test)]
+mod ffmpeg_check;
 mod frames;
 mod gen;
 mod js_dialogs;

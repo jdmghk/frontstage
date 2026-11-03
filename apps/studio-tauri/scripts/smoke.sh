@@ -1,7 +1,12 @@
 #!/bin/zsh
 # End-to-end run of the real editor in a hidden WKWebView (test build). Needs:
 #   VITE_TEST_PAGES=1 pnpm build:web && cargo build --features webkit-tests  (in src-tauri)
-# Usage: smoke.sh <scratch-dir> [debug|release] [timeout-secs]
+# Usage: smoke.sh <scratch-dir> [debug|release|/path/to/app/binary] [timeout-secs]
+# A path runs a packaged test build, such as .../Frontstage.app/Contents/MacOS/frontstage.
+#
+# Two ffmpegs: $FF and $FFP are apps/desktop's stock binaries. They only make the test clips (lavfi,
+# x265, libaom) and check the results, which the trimmed build can't and needn't do. The app under
+# test uses its own, and the result's env.tools.ffmpegPath says which file that was.
 # Throwaway data dir, a test-only Keychain service, a mock for every provider. Never opens a visible
 # window. Deletes all generated media at the end.
 set -o pipefail
@@ -55,7 +60,9 @@ echo "mock on $BASE"
 export FRONTSTAGE_TEST_DIR=$RUN FRONTSTAGE_TEST_KEYCHAIN_SERVICE=$SERVICE FRONTSTAGE_TEST_MCP_PORT=$(python3 -c "import socket;s=socket.socket();s.bind(('127.0.0.1',0));print(s.getsockname()[1])") \
   SPIKE_DIR=$RUN/media SPIKE_OUT=$RUN/result.json \
   OPENROUTER_BASE_URL=$BASE FRONTSTAGE_TEST_ANTHROPIC_BASE=$BASE FRONTSTAGE_TEST_FAL_BASE=$BASE FRONTSTAGE_TEST_MORPHIC_URL=$BASE/mcp
-$ROOT/apps/studio-tauri/src-tauri/target/$PROFILE/frontstage > $RUN/app.log 2>&1 &
+APP_BIN=$ROOT/apps/studio-tauri/src-tauri/target/$PROFILE/frontstage
+[[ $PROFILE == /* ]] && APP_BIN=$PROFILE
+$APP_BIN > $RUN/app.log 2>&1 &
 APP=$!
 for i in {1..$LIMIT}; do kill -0 $APP 2>/dev/null || break; sleep 1; done
 if kill -0 $APP 2>/dev/null; then echo "TIMED OUT after ${LIMIT}s"; kill $APP; fi
@@ -64,6 +71,7 @@ kill $MOCK 2>/dev/null
 unset FRONTSTAGE_TEST_DIR
 
 echo '--- result'; [ -f $RUN/result.json ] && cat $RUN/result.json
+echo '--- ffmpeg the app ran'; [ -f $RUN/result.json ] && grep -oE '"ffmpegPath": *"[^"]*"' $RUN/result.json
 echo '--- last app log'; tail -5 $RUN/app.log | cut -c1-300
 echo '--- mp4 checks'
 check() {

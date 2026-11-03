@@ -117,6 +117,16 @@ await step("env", async () => ({
   gpu: "gpu" in navigator,
   AudioDecoder: typeof (w as unknown as { AudioDecoder?: unknown }).AudioDecoder,
   tools: await invoke("app_tools_status"),
+  // What the minimum macOS version rests on, measured in this WKWebView.
+  required: {
+    VideoDecoder: typeof VideoDecoder,
+    VideoFrameCopyTo: typeof VideoFrame !== "undefined" && typeof VideoFrame.prototype.copyTo,
+    OffscreenCanvas2d: typeof OffscreenCanvas !== "undefined" && !!new OffscreenCanvas(1, 1).getContext("2d"),
+    OffscreenCanvasWebgl2: typeof OffscreenCanvas !== "undefined" && !!new OffscreenCanvas(1, 1).getContext("webgl2"),
+    AudioWorklet: typeof AudioWorkletNode,
+    WebGL2: !!document.createElement("canvas").getContext("webgl2"),
+    h264Baseline: (await VideoDecoder.isConfigSupported({ codec: "avc1.42E01E" }).catch(() => null))?.supported ?? null,
+  },
 }));
 
 await step("editor_mounted", () => until("top bar", () => q("top-bar-title")?.textContent ?? ""));
