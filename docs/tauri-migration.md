@@ -155,8 +155,7 @@ Rust modules in `src-tauri/src`, and `src/tauri-bridge.ts` exposes the same `win
 | `Frontstage.app` now, without ffmpeg | 9.0 MB |
 | ffmpeg and ffprobe, not bundled until Phase 3 | 78.9 MB and 62.2 MB |
 
-Until Phase 3, a release app needs both binaries copied into `Frontstage.app/Contents/MacOS/`. Without them, export and
-conversion fail with "ffmpeg not found beside the app". Debug and test builds use the ones in `apps/desktop/node_modules`.
+Phase 3 bundles ffmpeg and removes ffprobe. Before that, a release app needed both binaries copied in by hand.
 
 The UI adds so little because onnxruntime's 21.6 MB wasm is left out of the bundle: transformers.js always sets its
 `wasmPaths` to the CDN, so the copy Vite adds is never loaded.
@@ -201,6 +200,165 @@ a generation further from the source (CRF 16, preset veryfast). The cache isn't 
 - The macOS menu has its own app menu, so File no longer appears under the app's name. Force Reload and Toggle DevTools
   are gone.
 - wry doesn't implement `alert`, `confirm` or `prompt`, which silently answered no. `js_dialogs.rs` adds them on macOS.
+
+## Phase 3 results
+
+### Size, macOS x64
+
+| | Electron | Stock ffmpeg, computed | Now | Target |
+|---|---|---|---|---|
+| Installed app | 585 MB | about 88 MB (9.3 + 78.9) | **23.2 MiB** (`du`: 23,760 KB) | 100 MB or less |
+| DMG | 234 MB | about 31 MB (Phase 0 spike) | **8.3 MiB** (8,703,513 bytes) | about 40 MB or less |
+| ffmpeg | 78.9 MB | 78.9 MB | 14.9 MB (14,885,024 bytes) | |
+| ffprobe | 62.2 MB | none | none | |
+
+Those are the shipping build, unsigned. The app binary is 9.3 MB. The stock column wasn't built, except for the spike's DMG.
+
+### The bundled ffmpeg
+
+`scripts/build-ffmpeg.sh <triple>` builds FFmpeg 7.1.5, x264, dav1d 1.5.4 and zimg 3.0.6 from pinned commits and checksums into
+`src-tauri/binaries/` (gitignored). `pnpm bundle` adds it through `tauri.bundle.conf.json`, so it lands at
+`Frontstage.app/Contents/MacOS/ffmpeg`, which is the only place `tools.rs` looks in a shipped build. PATH is never searched.
+The separate config keeps `cargo build` and `cargo test` working on a checkout with no binary. Use `CI=true` when bundling, which
+makes Tauri's DMG step skip its Finder scripting, so no window opens.
+
+| | Stock (ffmpeg-static 6.1.1) | Trimmed |
+|---|---|---|
+| Decoders / encoders | 522 / 210 | 99 / 6 |
+| Formats | 408 | 39 |
+
+- **Time:** 23.6 minutes for a full x64 build at `-j2` under heavy outside load (x264 1.3, dav1d 6, zimg 2, ffmpeg 14), and
+  6 minutes for ffmpeg alone with the libraries kept.
+- **System libraries:** nothing beyond what macOS ships: libSystem, libc++, libz, CoreFoundation, CoreVideo and CoreMedia.
+- **Deployment target:** `minos 13.0`. It has only run on 13.7.8.
+- **No network protocols:** only `file` and `pipe`, so a crafted file can't make ffmpeg fetch anything.
+- **Dropped and not missed by any test:** Hap (needs snappy), hardware decoding and the rarer codecs. A clip in a dropped codec
+  fails conversion with ffmpeg's error, where stock would have converted it.
+
+**Apple Silicon:** the same script cross-compiles from this Intel Mac in 13 minutes to a 10.3 MB ad-hoc-signed binary with `minos 13.0` and the same system libraries. It can't run here (`bad CPU type`), so it has never been executed. No arm64 app or DMG has been built.
+
+### Format matrix
+
+`FRONTSTAGE_TEST_FFMPEG=<binary> cargo test ffmpeg_check::format_matrix -- --ignored --nocapture --test-threads=1` runs each file through
+the app's real conversion, frame sampling and audio extraction, with both binaries. Everything passed. Clips are 1 s of synthetic video
+with a 440 Hz tone, made by the stock build. No camera originals were available.
+
+- **Video, 45 files, all PSNR inf and SSIM 1.0 against stock's proxy, with the same colour tags:** H.264 (8-bit, High 10, 4:4:4 at an odd size,
+  full range, PQ, HLG, rotated), H.264 with PCM, ALAC, AC-3, MP3 and Opus audio, HEVC (hvc1, hev1, 10-bit PQ), AV1 (8, 10-bit), VP9 (8, 10-bit, WebM), VP8,
+  ProRes (Proxy, HQ, 4444), DNxHR, CineForm, DV, MJPEG, MPEG-4, MPEG-2, QuickTime RLE, PNG, UYVY, v210, SVQ1, H.263 in 3GP, and the
+  MKV, AVI, ASF, MPEG-PS, MPEG-TS, MXF, FLV and M4V containers.
+- **Audio, 21 files, within 1 sample value of stock, same lengths:** WAV (s16, s24, f32, A-law, mu-law, ADPCM), MP3, ADTS AAC, M4A (AAC, ALAC),
+  AIFF (s16, s24), AIFC (A-law, mu-law, IMA4, f32, sowt), FLAC, Vorbis, Opus, CAF.
+- **Images:** PNG, JPG, JPEG and TIFF decode. HEIC from macOS's `sips` decodes on the trimmed build and not on stock. The app shows images in the
+  webview and never hands them to ffmpeg, so this only records capability.
+- **Subtitles:** SRT and VTT read and written as `mov_text`.
+
+Two binaries, and it matters which is which: `apps/desktop`'s stock ffmpeg makes the test media and takes the measurements, in `smoke.sh` and in the
+cargo tests, because it has lavfi, x265 and libaom. The trimmed one is what the app runs. `tools::test_generator` and `$FF` are stock;
+`Tools::locate` and `FRONTSTAGE_TEST_FFMPEG` are the binary under test. `env.tools.ffmpegPath` in the smoke result names the file the app ran.
+
+### YouTube preset against stock
+
+The same frames and audio, from 10 s of the Sintel trailer at 1080p24 (`sintel_trailer-1080p.mp4` from download.blender.org, CC-BY), with an SRT, through the real
+`Exports` code with each binary.
+
+| | Stock | Trimmed |
+|---|---|---|
+| Video | h264 High, yuv420p(tv, bt709), 1920x1080, 5013 kb/s | identical |
+| Audio | aac LC, 48000 Hz, stereo, 309 kb/s | identical |
+| Subtitles | mov_text | identical |
+| Boxes | ftyp, moov, free, mdat (faststart) | identical |
+| File | 6,663,938 bytes | 6,663,923 bytes |
+
+PSNR is inf and SSIM is 1.000000, so the decoded video is the same, and the audio's RMS difference is 0. The 15 bytes are ffmpeg's version strings. The two
+builds' x264 produce the same pictures here. 309 kb/s is ffmpeg's AAC encoder on this audio with `-b:a 320k`, on both builds.
+`libx264` and `prores_ks` also match stock (at 640x360), with the same stream line. The test is `ffmpeg_check::youtube_preset_matches_stock`.
+
+### What moving to ffmpeg 7 would have broken
+
+Each of these passed or would have passed a weaker check. The tests now catch them.
+
+- **Colour tags:** ffmpeg 7 takes tags from the frames and ignores `-color_primaries` and `-color_trc` on the encoder, so exports came out `bt709/unknown/unknown`.
+  The tags now come from `setparams` in the filter, which both versions honour. Electron still uses the old arguments with ffmpeg 6.
+- **Full-range sources:** `format=yuv420p` no longer converts them to limited range, so MJPEG proxies differed (PSNR 43.5) and were tagged full range.
+  `proxy_args` now asks for it with `scale=out_range=tv`.
+- **Banner layout:** stream metadata is indented 8 spaces, not 6.
+- **configure ignores unknown names silently:** the encoder is `movtext`, not `mov_text`. The script now checks that every name it asked for was enabled.
+
+### Bug found: captions cut exports short
+
+`-shortest` counts the subtitle track, so an export with captions ended at the last caption. A 10 s YouTube export with a caption ending at 2 s came out 2 s long, on
+stock too. Tauri now ends a captioned export at the video's length with `-t`. **Electron has the same bug and isn't changed**
+(`apps/desktop/src/main/export-codecs.mjs`).
+
+### ffprobe
+
+`media_read_timecode` now parses `ffmpeg -i`. The renderer's `parseTimecodeTag` only uses the rate rounded to a whole number, so the banner's two decimals are enough. The cargo tests port the
+old cases and add real tagged clips at 30, 29.97 DF, 23.976, 25 and 59.94 DF. Tags and rounded rates match what the old ffprobe printed for the same clips, and MKV, WebM and MXF
+file-level tags are ignored by both. The smoke run read `01:00:00:00` at 30 fps through the packaged app.
+
+Known differences from ffprobe:
+- A file with a tmcd track and no video stream gives no timecode, so it exports from 0. ffprobe read the track's own rate.
+- A variable rate within 0.005 of x.5 could round the other way.
+
+`apps/desktop` keeps both its binaries. `smoke.sh` still uses its ffprobe to check results.
+
+### Licence obligations
+
+The trimmed binary is built with `--enable-gpl` and includes x264, so it is **GPL-2.0-or-later** as a whole. dav1d is BSD-2-Clause and zimg is WTFPL. Frontstage itself is GPLv3, which is compatible. No non-free option is enabled.
+To distribute the DMG:
+
+1. **Licence text and notices:** in the app at `Contents/Resources/licenses/` (`GPL-3.0.txt`, `NOTICE.txt`, `THIRD-PARTY-NOTICES.txt` with dav1d's and zimg's licences). The About panel points there.
+2. **Corresponding source, which is the one not yet in place:** publish the exact sources and build script next to each download. `SOURCE_ARCHIVE=1 scripts/build-ffmpeg.sh` makes `binaries/ffmpeg-sources.tar.xz`, and the installer
+   workflow uploads it. The notice promises this, so a release that omits it breaks the notice. Links to upstream alone aren't a safe substitute, because the distributor stays responsible for them staying available.
+3. **Frontstage's own source** at the same version, as for any GPL release. No extra restrictions on recipients.
+
+Patents are separate from all of this: H.264, HEVC and AAC may need licences in some countries, for whoever distributes. This isn't legal advice, and a person should decide on patents before a wider release.
+The Windows build uses a stock binary with many more bundled libraries, so its source obligation is harder: see below.
+
+### Minimum macOS: 13.7
+
+`bundle.macOS.minimumSystemVersion` was 13.0, whose Safari 16.1 predates WebCodecs. It's now 13.7.
+
+| Needed | Safari, per MDN browser-compat-data 8.1.8 | Measured in WKWebView here (13.7.8, Safari 18.6) |
+|---|---|---|
+| `VideoDecoder`, `VideoFrame.copyTo` | 16.4 | present, and it decodes |
+| `OffscreenCanvas` 2D | 16.4 | present |
+| `OffscreenCanvas` WebGL2 | 17, not needed | absent, the engine uses a detached canvas |
+| `AudioWorklet` | 14.1 | present |
+| WebGL2 | 15 | present |
+
+- **From documentation:** the API floor is Safari 16.4. A text scan of the bundle found nothing else newer than that (`Promise.withResolvers`, `Object.groupBy` and others are absent), but a scan can't see everything. Safari 16.4 shipping with
+  macOS 13.3 is from memory: Apple's page couldn't be read during this work. So the documented floor is about 13.3. Safari 18.1 on 13.7.1 is from Eclectic Light's report.
+- **Measured:** this Mac only. `WebKit.framework` here is 18615.3.12, which is Safari 18.6, so a Safari update changes what WKWebView runs.
+- **Why 13.7 and not 13.3:** nothing has run on WebKit 16.4 to 18.5, and the engine's fixes (the decode rejection rule, colour handling, odd chroma) were all worked out on 18.6. BCD describes Safari, not WKWebView. Every Mac on Ventura can update to 13.7 for free, so the
+  cost is small, and the cost of guessing wrong is wrong pictures. Lower it after a real run on an older system.
+- **Limits of this:** the OS version doesn't pin WebKit, since Safari updates separately. Macs on 13.7 with an older Safari, and macOS 14, 15 and 26, pass the check and are untested. Newer WebKit has WebGPU and `AudioDecoder`, so
+  those Macs would take different engine paths than the ones measured.
+
+### Windows: untested and uncompiled
+
+Nothing for Windows has been compiled, installed or run. These are in place and unproven:
+
+- `.github/workflows/tauri-installers.yml`, run by hand and producing artifacts only. It has never run, for any platform.
+- `tauri.bundle.windows.conf.json`, `icons/icon.ico` (one 256x256 PNG) and `scripts/fetch-ffmpeg.mjs`, which fetches stock FFmpeg 6.1.1 essentials (gyan.dev, through ffmpeg-static's release, SHA-256 pinned, 29.6 MB compressed).
+- `tools::command` sets `CREATE_NO_WINDOW`, so a console shouldn't open for each ffmpeg run.
+
+Before shipping it: run the format matrix on Windows, and either publish source for every library in that stock build or build a trimmed one. The trimmed script is macOS only.
+
+### Verification
+
+- `pnpm turbo run test typecheck --concurrency=1`: 20 of 20 tasks, 3,090 tests. 18 tasks came from turbo's cache, since this phase changed only `apps/studio-tauri`.
+- `cargo test`: 204 passed, 2 ignored (the checks above), with stock and with `FRONTSTAGE_TEST_FFMPEG` set to the trimmed build.
+- `scripts/smoke.sh <dir> <...>/Frontstage.app/Contents/MacOS/frontstage`: a packaged release build with `--features webkit-tests`, whose result names `Contents/MacOS/ffmpeg` as the binary it ran. 30 of 30 steps, no errors. The band readback is b51a1c, as before.
+- The shipping DMG, mounted read-only: same ffmpeg as built, and it runs. The app binary has no test pages or repo paths in it. **The shipping build itself hasn't been launched**, because it can only open a visible window. That's Phase 4.
+
+### Not proven
+
+- Apple Silicon. The arm64 ffmpeg compiles and links and nothing more. Its format matrix, app and DMG are all still to do, on an Apple Silicon Mac or the workflow's `macos-14` job.
+- Quarantine: an unsigned download's sidecar under Gatekeeper hasn't been tried. Users may need to clear the quarantine attribute.
+- Real camera files through the trimmed build. Only the Sintel export input and synthetic clips were used.
+- Long or large files, beyond 10 s at 1080p.
 
 ## Bug found along the way
 `ring-worklet.ts?url` was inlined into production bundles as a raw TypeScript `data:` URL, which
