@@ -147,3 +147,12 @@ Test media comes from `apps/studio-tauri/scripts/gen-clips.py`; none of it is co
 `ring-worklet.ts?url` was inlined into production bundles as a raw TypeScript `data:` URL, which
 `addModule` rejects, so the engine's audio graph failed to start in production builds of the desktop
 and web apps. Dev builds weren't affected. Fixed by loading plain JS through a same-origin blob.
+
+## Phase 1 review notes
+- The `audio-graph` harness failures were not load alone. All four captured hangs stopped in `AudioContext.resume()`
+  with no user gesture, on both transports. With `--autoplay-policy=no-user-gesture-required` in the headless config,
+  the spec passed 16 of 16 under the same outside load (before: 12 of 16). This points to Chromium's autoplay policy
+  and not the worklet code. Neither Electron nor Tauri sets that flag, so the real play path relies on the click.
+- The fixture now waits for the audio clock to advance (up to 15 s) instead of a fixed 350 ms.
+- Midtones: WebKit keeps matching ffmpeg. Chromium's hardware-decode lift (128 to 139) stays a known difference.
+- Still open for Phase 4: re-measure fps in a visible window on a quiet machine. Outside load was 40-360 during review.

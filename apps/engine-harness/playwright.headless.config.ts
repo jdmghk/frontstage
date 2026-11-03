@@ -17,6 +17,7 @@ export default defineConfig({
             "--enable-unsafe-webgpu",
             "--ignore-gpu-blocklist",
             "--use-angle=metal",
+            "--autoplay-policy=no-user-gesture-required",
           ],
         },
       },
