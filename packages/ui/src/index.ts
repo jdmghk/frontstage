@@ -96,4 +96,5 @@ export { localProjectStore } from "./storage/local-project-store.js";
 export { BlendControl, AdjustSlider, ScrubbableNumberField, AdjustSection, AdjustmentRow, adjustmentRow, ColorWheelPad, ColorWheelControl, ColorWheelsSection, CurveEditor, CurvesSection, EffectsSection, LUTSection, LutReconciler } from "./inspector/adjust/index.js";
 export type { BlendControlProps, AdjustSliderProps, ScrubbableNumberFieldProps, AdjustSectionProps, AdjustmentRowProps, ColorWheelPadProps, ColorWheelControlProps, ColorWheelsSectionProps, CurveEditorProps, CurvesSectionProps, EffectsSectionProps, LUTSectionProps } from "./inspector/adjust/index.js";
 export { exportPresets, exportInfo } from "./editor/export-presets.js";
+export { ExportPresetDialog } from "./editor/ExportPresetDialog.js";
 export type { ExportPreset, ExportPresetId, ExportInfo } from "./editor/export-presets.js";

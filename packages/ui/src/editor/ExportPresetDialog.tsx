@@ -3,9 +3,16 @@ import { theme } from "../theme/theme.js";
 import { Button } from "../primitives/index.js";
 import type { ExportPreset, ExportPresetId } from "./export-presets.js";
 
-/** In-app export size picker for hosts without a native dialog (the web editor). */
-export function ExportPresetDialog({ presets, onChoose }: { presets: ExportPreset[]; onChoose: (id: ExportPresetId | null) => void }) {
+/** Only the fields the dialog reads, so a host can pass plain options. */
+export type ExportPresetOption = Pick<ExportPreset, "id" | "label" | "enabled" | "note">;
+
+/**
+ * In-app export size picker for hosts without a native dialog (the web editor and the Tauri app).
+ * `captions` adds the subtitle-track choice; `onChoose`'s second argument reports it.
+ */
+export function ExportPresetDialog({ presets, onChoose, captions, detail }: { presets: ExportPresetOption[]; onChoose: (id: ExportPresetId | null, subtitleTrack: boolean) => void; captions?: boolean; detail?: string }) {
   const [selected, setSelected] = useState<ExportPresetId>(presets.find((p) => p.enabled)?.id ?? "timeline");
+  const [subtitleTrack, setSubtitleTrack] = useState(false);
   return (
     <div
       data-testid="export-preset-dialog"
@@ -22,12 +29,18 @@ export function ExportPresetDialog({ presets, onChoose }: { presets: ExportPrese
             </span>
           </label>
         ))}
-        <div style={{ fontSize: theme.fontSize.xs, color: theme.text.tertiary }}>YouTube presets use H.264 High at a YouTube-class bitrate with 320 kbps audio.</div>
+        {captions && (
+          <label style={{ display: "flex", gap: theme.spacing.sm, alignItems: "flex-start", cursor: "pointer" }}>
+            <input type="checkbox" checked={subtitleTrack} onChange={(e) => setSubtitleTrack(e.target.checked)} data-testid="export-preset-subtitle-track" />
+            <span style={{ fontSize: theme.fontSize.sm, color: theme.text.primary }}>Captions as a subtitle track (switchable on YouTube) instead of burned into the picture</span>
+          </label>
+        )}
+        <div style={{ fontSize: theme.fontSize.xs, color: theme.text.tertiary }}>{detail ?? "YouTube presets use H.264 High at a YouTube-class bitrate with 320 kbps audio."}</div>
         <div style={{ display: "flex", gap: theme.spacing.sm, justifyContent: "flex-end" }}>
-          <Button onClick={() => onChoose(null)} testid="export-preset-cancel">
+          <Button onClick={() => onChoose(null, false)} testid="export-preset-cancel">
             Cancel
           </Button>
-          <Button variant="accent" onClick={() => onChoose(selected)} testid="export-preset-continue">
+          <Button variant="accent" onClick={() => onChoose(selected, subtitleTrack)} testid="export-preset-continue">
             Continue
           </Button>
         </div>

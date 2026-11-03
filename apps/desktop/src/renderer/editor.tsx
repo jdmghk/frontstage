@@ -23,6 +23,8 @@ declare global {
     // authorizePath's nonce (M13B final-review H-2) is minted main-side per in-flight MCP
     // callTool dispatch and threaded through by desktop-project-nav.ts — see its setAuthNonce.
     desktopProjectNav?: DesktopProjectNavBridge;
+    // Tauri only: converts clips its webview can't decode. Electron decodes them or doesn't set this.
+    desktopVideoProxy?: { attach(library: MediaLibrary, projectDir: () => string | undefined): void };
   }
 }
 import { DesktopGateway } from "./desktop-gateway.js";
@@ -446,6 +448,7 @@ window.desktopMcp?.onBridgeRequest(async ({ id, kind, payload }) => {
 // Expose for E2E tests
 (window as unknown as Record<string, unknown>).__frontstageStore = store;
 (window as unknown as Record<string, unknown>).__mediaLibrary = library;
+window.desktopVideoProxy?.attach(library, () => (session.getState().ref as DesktopProjectRef | null)?.path);
 (window as unknown as Record<string, unknown>).__projectSession = session;
 (window as unknown as Record<string, unknown>).__desktopGateway = gateway;
 (window as unknown as Record<string, unknown>).__agentSession = agentSession;

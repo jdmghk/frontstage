@@ -22,6 +22,15 @@ export class MediaLibrary {
   private _manifestVersion = 2;
   private listeners = new Set<() => void>();
   private _gateway: MediaGateway | null = null;
+  private _byteFilter: ((entry: MediaManifestEntry, blob: Blob) => Promise<Blob>) | null = null;
+
+  /**
+   * Lets a host swap what the engine reads for an entry, without touching the entry or the project:
+   * the Tauri app hands back an H.264 proxy for clips its webview can't decode.
+   */
+  setByteFilter(filter: ((entry: MediaManifestEntry, blob: Blob) => Promise<Blob>) | null): void {
+    this._byteFilter = filter;
+  }
 
   getSnapshot(): LibrarySnapshot {
     return this._snapshot;
@@ -164,10 +173,14 @@ export class MediaLibrary {
         if (e.source.kind !== "project") throw new Error("non-project source for: " + ref);
         const relativePath = e.source.relativePath;
         const bytes = this._bytes.get(relativePath);
-        if (bytes) return new Blob([bytes as BlobPart]);
-        if (!this._gateway) throw new Error("no gateway and no in-memory bytes for: " + relativePath);
-        const gatewayBytes = await this._gateway.readMedia(relativePath);
-        return new Blob([gatewayBytes as BlobPart]);
+        let blob: Blob;
+        if (bytes) {
+          blob = new Blob([bytes as BlobPart]);
+        } else {
+          if (!this._gateway) throw new Error("no gateway and no in-memory bytes for: " + relativePath);
+          blob = new Blob([(await this._gateway.readMedia(relativePath)) as BlobPart]);
+        }
+        return this._byteFilter ? this._byteFilter(e, blob) : blob;
       },
     };
   }

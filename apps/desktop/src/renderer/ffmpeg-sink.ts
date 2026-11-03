@@ -2,8 +2,10 @@ import type { ExportSink, PushAudioPcm, PushFrameSource } from "@frontstage/engi
 
 export interface DesktopExportBridge {
   start(opts: { width: number; height: number; fps: number; audio?: { sampleRate: number; channels: number }; codec: string; outPath: string; subtitlesSrt?: string }): Promise<string>;
-  videoFrame(buf: Uint8Array): void;
-  audioData(buf: Uint8Array): void;
+  // Electron's IPC send returns nothing. Tauri's returns a promise, which the sink awaits so frames
+  // stay in order and a fast renderer can't queue gigabytes ahead of ffmpeg.
+  videoFrame(buf: Uint8Array): void | Promise<void>;
+  audioData(buf: Uint8Array): void | Promise<void>;
   finish(): Promise<string>;
 }
 
@@ -43,7 +45,7 @@ export class FfmpegIpcSink implements ExportSink {
   async pushFrame(source: PushFrameSource): Promise<void> {
     // WebGL2 has no device to lose, and its canvas isn't reliably readable through a VideoFrame on WebKit.
     if (source.renderer.backend === "webgl2") {
-      this.bridge.videoFrame(await source.renderer.readRGBA());
+      await this.bridge.videoFrame(await source.renderer.readRGBA());
       return;
     }
     const rgba = new Uint8Array(this.width * this.height * 4);
@@ -53,18 +55,18 @@ export class FfmpegIpcSink implements ExportSink {
     } finally {
       vf.close();
     }
-    this.bridge.videoFrame(rgba);
+    await this.bridge.videoFrame(rgba);
   }
 
   async pushAudioData(data: AudioData): Promise<void> {
     const f32 = new Float32Array(data.numberOfFrames * data.numberOfChannels);
     // f32 (interleaved) — all channels in plane 0, no left-channel-only reduction
     await data.copyTo(f32, { planeIndex: 0, format: "f32" });
-    this.bridge.audioData(new Uint8Array(f32.buffer));
+    await this.bridge.audioData(new Uint8Array(f32.buffer));
   }
 
-  pushAudioPcm(pcm: PushAudioPcm): void {
-    this.bridge.audioData(new Uint8Array(pcm.data.buffer, pcm.data.byteOffset, pcm.data.byteLength));
+  async pushAudioPcm(pcm: PushAudioPcm): Promise<void> {
+    await this.bridge.audioData(new Uint8Array(pcm.data.buffer, pcm.data.byteOffset, pcm.data.byteLength));
   }
 
   async finalize(): Promise<undefined> {

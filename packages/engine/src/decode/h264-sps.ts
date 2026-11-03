@@ -151,7 +151,7 @@ export function parseAvcDecoderConfig(avcC: Uint8Array): AvcStreamInfo | null {
 /** Why WKWebView can't show this H.264 stream correctly; it needs an import proxy. Null if it can. */
 export function videoProxyReason(codec: string, info: AvcStreamInfo | null): string | null {
   if (!codec.startsWith("avc") || !info) return null;
-  if (info.bitDepth > 8) return `${info.bitDepth}-bit H.264 decodes to garbage in this webview`;
+  if (info.bitDepth > 8) return `${info.bitDepth}-bit H.264 doesn't decode correctly in this webview`;
   if (info.chromaFormatIdc !== 1) return "H.264 that isn't 4:2:0 doesn't decode in this webview";
   if (info.crop.left || info.crop.top) return "H.264 with a left or top crop renders shifted in this webview";
   if (info.transfer === "pq" || info.transfer === "hlg") return "HDR H.264 isn't tone-mapped in this webview";

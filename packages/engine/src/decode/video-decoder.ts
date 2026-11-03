@@ -20,6 +20,27 @@ function isWebKitDecoder(): boolean {
   return typeof navigator !== "undefined" && /AppleWebKit/.test(navigator.userAgent) && !/Chrome\//.test(navigator.userAgent);
 }
 
+const CODEC_NAMES: [string, string][] = [["hev1", "HEVC"], ["hvc1", "HEVC"], ["av01", "AV1"], ["vp09.02", "10-bit VP9"], ["vp09", "This VP9"], ["vp8", "VP8"], ["avc", "This H.264"]];
+
+/** Why this browser can't decode the track and it needs converting; null if it can. */
+export async function videoDecodeProblem(track: DemuxedTrack): Promise<string | null> {
+  if (isWebKitDecoder()) {
+    const info = track.description ? parseAvcDecoderConfig(track.description) : null;
+    const reason = videoProxyReason(track.codec, info);
+    if (reason) return reason;
+  }
+  const support = await VideoDecoder.isConfigSupported({
+    codec: track.codec,
+    codedWidth: track.codedWidth,
+    codedHeight: track.codedHeight,
+    ...(track.description ? { description: track.description } : {}),
+    // WebKit throws TypeError for HEVC and AV1 config strings instead of reporting them unsupported.
+  }).catch(() => ({ supported: false }));
+  if (support.supported) return null;
+  const name = CODEC_NAMES.find(([prefix]) => track.codec.startsWith(prefix))?.[1] ?? `Video in ${track.codec}`;
+  return `${name} video doesn't decode in this webview`;
+}
+
 interface KeyframeEntry { chunkIndex: number; micros: number; }
 
 export class VideoDecodeManager {
