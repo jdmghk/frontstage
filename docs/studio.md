@@ -5,6 +5,43 @@ characters, Morphic generation, Claude writing, a Google Flow hand-off, a voice 
 choreography planning. Everything lives inside the existing editor — two new tabs on the media panel's left
 rail, no separate dashboard.
 
+## Installing the Mac app
+
+The desktop app is now `apps/studio-tauri` (Tauri, the system WebKit and a bundled trimmed ffmpeg). The Electron
+app in `apps/desktop` still builds, but it isn't the one to install. Numbers and test details are in
+[tauri-migration.md](tauri-migration.md).
+
+1. Get `Frontstage_0.3.0_x64.dmg` (built with `CI=true pnpm -F @frontstage/studio-tauri bundle`; it lands in
+   `apps/studio-tauri/src-tauri/target/release/bundle/dmg/`). Open it and drag **Frontstage** to **Applications**.
+2. The app is unsigned. On first open, macOS may refuse it. Go to **System Settings → Privacy & Security**,
+   scroll down, click **Open Anyway** and confirm. (On macOS 13 and 14, right-click the app → **Open** also works.)
+   If a downloaded copy says it's damaged, the quarantine flag is the cause:
+   `xattr -dr com.apple.quarantine /Applications/Frontstage.app`.
+3. Settings → Agent and Settings → Generation: re-enter your API keys and sign in to Morphic again. When you save a
+   key, macOS may ask whether Frontstage can use the Keychain; choose **Always Allow**.
+
+### Differences from the Electron app
+
+- **Fresh start once:** API keys, Morphic sign-in, recent projects, the MCP token and window position don't carry
+  over. The app has its own data folder (`~/Library/Application Support/studio.frontstage.tauri`) and Keychain
+  service. Keys can't be moved, because Electron encrypted them with its own key; a notice says so if old ones exist.
+  Project folders are unchanged and open with File → Open.
+- **Some sources are converted on import:** HEVC, AV1, 10-bit and HDR video, 4:4:4 H.264 and H.264 with a left/top
+  crop are copied to H.264 (CRF 16) in the app's cache, with a progress message. The project keeps the original;
+  preview and export use the copy. The cache isn't size-limited yet.
+- **Export preset choice** is the editor's own dialog, not a system message box. Captioned exports keep the
+  video's full length (Electron's could end at the last caption).
+- **Menus:** the app menu is separate, so File isn't under the app's name. Force Reload and Toggle DevTools are gone.
+- **Morphic sign-in** sends and checks an OAuth `state` value. It hasn't been tried against the real server yet.
+- **Memory doesn't improve.** The gain is download and install size.
+
+### Known limits
+
+- Minimum macOS 13.7. Only tested on one Intel Mac running 13.7.8 (Safari 18.6's WebKit).
+- Windows and Apple Silicon are untested: nothing has been built or run for them beyond an arm64 ffmpeg.
+- Formats left out of the trimmed ffmpeg (Hap, hardware decoding, rare codecs) fail to convert, with ffmpeg's error.
+- Long files are untested: the longest export run so far is 10 s of 1080p.
+
 ## Feature status
 
 | Feature | Status | Notes |
@@ -70,7 +107,7 @@ references; if it was a shot's approved take, the shot drops back to `generated`
 
 ## Claude writing (desktop)
 
-1. **Settings → Agent → Anthropic (Claude writing)**: paste an Anthropic API key. It's encrypted with
+1. **Settings → Agent → Anthropic (Claude writing)**: paste an Anthropic API key. It's kept in
    the OS keychain in the main process and never reaches the renderer. Pick the writing model:
    Claude Opus 5.5 (default) or Claude Sonnet 5.5.
 2. **Production → Story**: write the idea, then **Write outline** (logline, outline and, on an empty
