@@ -4,6 +4,12 @@ name: Tauri installers
 
 "on":
   workflow_dispatch:
+    inputs:
+      platform:
+        description: Which installers to build
+        type: choice
+        default: all
+        options: [all, windows, macos]
 
 permissions:
   contents: read
@@ -16,6 +22,7 @@ env:
 
 jobs:
   macos:
+    if: inputs.platform != 'windows'
     strategy:
       fail-fast: false
       matrix:
@@ -54,6 +61,7 @@ jobs:
             apps/studio-tauri/src-tauri/binaries/ffmpeg-sources.tar.xz
 
   windows:
+    if: inputs.platform != 'macos'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -75,3 +83,7 @@ jobs:
         with:
           name: frontstage-windows
           path: apps/studio-tauri/src-tauri/target/release/bundle/nsis/*.exe
+      # Runs after the upload so a test failure still leaves the installer to look at.
+      - name: Rust tests on Windows
+        working-directory: apps/studio-tauri/src-tauri
+        run: cargo test
