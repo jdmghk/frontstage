@@ -385,3 +385,123 @@ and web apps. Dev builds weren't affected. Fixed by loading plain JS through a s
 - The Rust SSRF check is now stricter than Electron's: it also covers 192.0.0.0/24, 198.18.0.0/15, multicast and reserved
   IPv4, NAT64 and 6to4 embedded IPv4, IPv4-compatible IPv6, site-local and multicast IPv6. Electron's list is unchanged.
 
+
+## Phase 4 results
+
+All on the same Mac (macOS 13.7.8, Intel dual-core m3), 7 November 2026 unless a row says otherwise. Load is `uptime`'s 1-minute
+average at the start and end of each run; "speed" is `pmset -g therm`'s CPU speed limit, since this fanless Mac also throttles
+itself (it read 33 to 100 during these runs). No run here was on an idle machine: the lowest load seen was 2.3.
+
+### Shipping build
+
+Built from `d9c0da9` (same app code as `f08da83`) with `CI=true pnpm bundle`.
+
+| | Electron 31 (`electron-builder --mac dir --x64`, rebuilt today) | Tauri 2 |
+|---|---|---|
+| Installed app (`du -sk`) | 609,636 KB (595 MiB) | **23,760 KB (23.2 MiB)** |
+| DMG | 244,826,601 bytes (233.5 MiB, `hdiutil` UDZO) | **8,703,372 bytes (8.3 MiB)** |
+
+The Tauri app is unsigned (`codesign`: not signed at all; `spctl`: rejected), so Gatekeeper's Open Anyway step is needed. The binary has no test
+pages or test commands in it, and `Contents/MacOS/ffmpeg` is byte-identical to `binaries/ffmpeg-x86_64-apple-darwin`.
+
+`smoke.sh` on a packaged `--features webkit-tests` build of the same commit: 30 of 30 (env plus 29 steps), no errors, no CSP reports, the result names the
+bundled `Contents/MacOS/ffmpeg`, red band b51a1c as before, no Keychain entries left under the test service. Load 3.5 to 4.0.
+
+### First launch of the shipping build
+
+Launched from a copy of the DMG's contents with `open -g`, with `HOME` and `CFFIXED_USER_HOME` pointing at a scratch folder, and a scratch-only
+library injected with `DYLD_INSERT_LIBRARIES`. The library is not part of the app. It blocks focus changes and Keychain lookups, and reads the page
+through WebKit's own API, because a shipping build has no test hooks.
+
+- **Starts, stays up, loads the editor:** up for 2 min 51 s, then quit through `NSRunningApplication.terminate`, gone within 1 s. A WebKit snapshot
+  shows the full editor (Media, Preview, Timeline, Inspector) with an empty project titled *Untitled*. No page errors, `console.error` calls or
+  unhandled rejections were seen. All 13 `window.desktop*` objects were present. `crossOriginIsolated` false, no `navigator.gpu`, no `AudioDecoder`, as expected here.
+- **It asks for focus even with `open -g`.** tao calls `activateIgnoringOtherApps` at launch (three calls, one with `true`) and `makeKeyAndOrderFront`.
+  The injected library blocked these. Launched normally that's what a user wants, but a background launch will take focus.
+- **No Keychain lookups** at startup: the blocking hooks never fired.
+- **Files:** only under the scratch home: `Application Support/studio.frontstage.tauri/{mcp-token,window-state.json}`, WebKit caches and website data,
+  and Saved Application State. The real `~/Library` folders named after the app (left there by earlier test runs) were unchanged, by name, size and mtime.
+  There was no Electron data folder (`~/Library/Application Support/Frontstage`) on this Mac to protect.
+- **Focus:** frontmost was `loginwindow` (the screen was locked) before and during the run. At 2 min 46 s the window became visible, key and
+  1440x900, and the app became frontmost. This lines up with someone unlocking the Mac and clicking or zooming the window; the app's own activation
+  calls at that moment were blocked. After the quit, Preview was frontmost.
+- **Not seen:** menus, dialogs, sound, drag and drop, and the picture in an unobscured window. A shipping build has no hooks, so they're left to the
+  user's checklist.
+
+### Memory, RSS summed over every process
+
+Tauri counts the app, its children and every `com.apple.WebKit.*` helper (WebContent, GPU, Networking) that appeared after launch. Electron counts the
+main process and all its helpers. ffmpeg is shown separately. RSS double-counts shared pages, so these overstate both.
+
+| Run | Electron | Tauri | Load |
+|---|---|---|---|
+| Editor open, idle | 268 MB median, 274 peak (hidden window, real editor, 90 s) | 214 MB median, 258 peak (shipping build, window behind others, 2 min 51 s) | E 9.5 to 3.5; T 2.9 to 24.6 |
+| Playback, `phase1.html` `playback` section | peaks 390 and 414 MB | peaks 297 and 282 MB | 9.8 to 10.6, then 50 to 39 |
+| 1080p YouTube export, app alone | peaks 433 to 556 MB | peaks 328 to 354 MB | 3.5 to 100 |
+| Same, with ffmpeg | 1,100 to 1,224 MB | 1,004 to 1,031 MB | |
+
+**Memory came out lower on Tauri in these runs**, which reverses Phase 0's peak of 372 MB on Electron against 540 MB on WebKit. That was a different page
+(`bench.html`), so the two can't be set side by side. Electron's main process grew to 975 MB in one export on 3 November under load 258: Electron's
+frame send doesn't wait, so frames queue in the main process when ffmpeg falls behind. The Tauri sink waits for each frame.
+
+### Export speed
+
+Both apps ran the same `export_speed` section of `phase1.html`: 300 frames of `clip1080.mp4` at 1920x1080, with its audio, through `runExport` and the
+desktop `FfmpegIpcSink` with `libx264_youtube`, into each app's real export code. Electron used its WebGPU renderer and stock ffmpeg 6.1.1, Tauri WebGL2
+and the trimmed ffmpeg 7.1.5. Both outputs: H.264 High, yuv420p, BT.709, 300 frames, AAC 469 frames. PSNR between them is 48.8 dB (the renderers' pixels differ slightly).
+
+| Run, 7 Nov | Seconds | Frames/s | Load start to end |
+|---|---|---|---|
+| Tauri a | 39.6 | 7.57 | 3.5 to 3.8 |
+| Electron a | 54.6 | 5.49 | 3.8 to 7.2 |
+| Electron b | 65.8 | 4.56 | 7.2 to 100 |
+| Tauri b | 84.2 | 3.56 | 100 to 50 |
+| Electron c | 54.5 | 5.50 | 4.1 to 9.4 |
+| Tauri c | 57.1 | 5.26 | 9.4 to 6.8 |
+| Electron d | 56.3 | 5.32 | 6.8 to 9.2 |
+| Tauri d | 64.7 | 4.64 | 9.2 (the app's exit then took 7 minutes, likely the Mac sleeping) |
+
+On 3 November, under loads of 11 to 258: Electron 140.3 s and 276.8 s, Tauri 152.5 s and 140.7 s.
+
+**About the same.** The fastest run was Tauri's, at the lowest load, but at matched loads of 4 to 9 the two were within about 10% either way, and load
+moved more than that within single runs. Phase 0's 1.5 frames/s came from the spike's raw path under heavy load and isn't comparable.
+
+### Preview fps
+
+`phase1.html`'s `fps` section in the packaged test build, which now records `document.visibilityState` and whether `requestAnimationFrame` ran.
+Every run below reported `hidden` from start to end and no `requestAnimationFrame` calls, so **all of these are throttled, hidden-window numbers, not
+on-screen ones**.
+
+| Render / source | 1 layer | 2 layers | 3 layers | 1 layer + 3 colour + gaussian |
+|---|---|---|---|---|
+| 540p / 540p | 142.6 / 147.1 / 175.8 | 105.9 / 84.1 / 69.0 | 51.9 / 45.6 / 64.2 | 82.2 / 64.9 / 85.6 |
+| 540p / 1080p | 100.0 / 107.4 / 92.2 | 46.2 / 50.3 / 46.6 | 19.3 / 25.5 / 27.5 | 56.9 / 57.7 / 54.4 |
+| 1080p / 1080p | 70.0 / 72.8 / 74.4 | 34.4 / 36.8 / 35.0 | 22.4 / 23.4 / 23.5 | 29.5 / 29.9 / 27.7 |
+
+Runs: hidden Accessory window, load 11.1 to 9.8 (speed 100 to 83); hidden Accessory window, load 38.7 to 25.2 (speed 83); Regular-policy window launched
+with `open -g`, load 5.5 to 4.7, with the screen locked, so it never reached the screen.
+
+Earlier runs, for the record: on 3 November a Regular window launched with `open -g` and kept at the back was `visible` for its first 18 s, and
+`requestAnimationFrame` ran there (134 calls, about 7 a second, the page being busy). Then another window covered it, it went `hidden` and
+`requestAnimationFrame` stopped for the rest of the run. Its 1080p cells (4.4, 2.4, 3.4, 4.9) ran while it was covered. A hidden run that day at load
+5.5 to 8.4 gave 1.6 and 2.2 fps for 1080p with 2 and 3 layers (composite p50 324 and 372 ms), against 25.7 and 12.4 a few minutes later. One-off
+collapses like these are why each number needs its load and a repeat.
+
+Playback through `PlaybackEngine` (640x360 from the 1080p clip, `requestAnimationFrame` stood in for by a message loop) showed 174 of 174 frames at
+29.9 fps with no audio underruns, at load 9.8 to 10.6 and again at 45 to 39.
+
+**On-screen numbers need the user:** open the test build's `phase1.html?only=fps` (or any 1080p timeline in the app) in a window that's in front and
+uncovered, leave the Mac alone for the 90 seconds it takes, and note whether `page.rafPerSec` is near 60.
+
+### Tests
+
+See the final verification in the Phase 4 commit message for the turbo and cargo totals.
+
+### Not proven
+
+- Anything a person has to see, hear or click: picture and sound in an uncovered window, menus, file pickers, JS dialogs, drag and drop, Reveal and Open
+  skills folder. Morphic sign-in with the new `state` value, real Claude and fal calls, and saving a real key in an unsigned app's Keychain. These are on
+  the user's checklist.
+- Gatekeeper and quarantine on a downloaded DMG. The DMG here was built locally and never quarantined.
+- Long exports, real HDR footage and real camera files. Windows and Apple Silicon.
+- Whether `apps/desktop` can go. That's the user's decision, and needs `morphic-client.mjs` moved or the proxy ported first.
