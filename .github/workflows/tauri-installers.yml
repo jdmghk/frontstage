@@ -10,6 +10,10 @@ name: Tauri installers
         type: choice
         default: all
         options: [all, windows, macos]
+  # workflow_dispatch only works once this file is on the default branch. Until then, pushing a
+  # ci/windows-* branch builds the Windows installer.
+  push:
+    branches: ["ci/windows-*"]
 
 permissions:
   contents: read
@@ -22,7 +26,7 @@ env:
 
 jobs:
   macos:
-    if: inputs.platform != 'windows'
+    if: github.event_name == 'workflow_dispatch' && inputs.platform != 'windows'
     strategy:
       fail-fast: false
       matrix:
