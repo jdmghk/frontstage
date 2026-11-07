@@ -495,7 +495,9 @@ uncovered, leave the Mac alone for the 90 seconds it takes, and note whether `pa
 
 ### Tests
 
-See the final verification in the Phase 4 commit message for the turbo and cargo totals.
+- `pnpm turbo run test typecheck --concurrency=1`: 20 of 20 tasks, 3,092 tests passed, 4 tasks from turbo's cache. Load 3.6 to 6.3, 3 min 12 s.
+- `cargo test` in `src-tauri`: 204 passed, 0 failed, 2 ignored (the format matrix and YouTube checks, which need `--ignored`). Load 6.3 to 9.3.
+- `smoke.sh` on the packaged test build: above.
 
 ### Not proven
 
