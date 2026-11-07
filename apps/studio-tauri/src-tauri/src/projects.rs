@@ -209,7 +209,7 @@ mod tests {
         let d = TempDir::new("reg");
         let e = registry_upsert(d.path(), "/projects/Alpha", "Alpha").unwrap();
         assert_eq!(e.name, "Alpha");
-        assert_eq!(e.path, "/projects/Alpha");
+        assert_eq!(e.path, crate::util::resolve("/projects/Alpha").to_string_lossy());
         assert!(!e.id.is_empty());
         assert_eq!(load_registry(d.path()), vec![e]);
     }

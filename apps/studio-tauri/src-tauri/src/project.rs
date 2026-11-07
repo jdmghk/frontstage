@@ -453,7 +453,9 @@ mod tests {
         let (a, n) = (Authorized::default(), NonceGuard::default());
         let nonce = n.mint().unwrap();
         let r = authorize_path(&a, &n, "/definitely/not/here", Some(&nonce));
-        assert_eq!(r["error"].as_str().unwrap(), "No project at /definitely/not/here.");
+        // Resolved like Node's path.resolve, so Windows adds the current drive.
+        let shown = crate::util::resolve("/definitely/not/here").display().to_string();
+        assert_eq!(r["error"].as_str().unwrap(), format!("No project at {shown}."));
         assert!(a.check("/definitely/not/here").is_err());
     }
 }
